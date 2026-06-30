@@ -31,3 +31,13 @@
       NOI row can be read directly even when the workbook lists both. Today the
       reconcile guard handles correctness; this would add a true Tier-1 NOI on
       models that expose one.
+
+## Deployment — before public release
+- [ ] Set Cloud Run `paw-prints-api` to `min-instances=1`. Currently scale-to-zero
+      (cold start ~45-60s on a complex multi-sheet model, occasionally triggers a
+      client-side "Load failed" on the first request after idle — confirmed via
+      Cloud Run logs: the same upload that failed once succeeded ~immediately on
+      retry once the instance was warm). Fine for now while testing solo; revisit
+      before sharing the link more broadly. `gcloud run services update
+      paw-prints-api --region=us-west1 --min-instances=1` (~$5-10/mo idle cost
+      at the current 512Mi/1vCPU allocation).
