@@ -251,7 +251,7 @@ def _acquisition_claims(fs: dict) -> list[dict]:
                if isinstance(gi_occ, (int, float)) and isinstance(stab_occ, (int, float)) else "")
     claims.append({
         "id": "thesis", "direction": a["label"], "confidence": a["confidence"],
-        "headline": f"{a['label'].title()} — NOI {m(nb['going_in'])} → {m(nb['stabilized'])}"
+        "headline": f"{a['label'].title()} — NOI {m(nb['going_in'])} → {m(nb['exit'])}"
                     + (f" ({growth*100:+.0f}%)" if isinstance(growth, (int, float)) else "") + occ_str,
         "what_changed": "", "why": a["lens"],
         "why_matters": (f"Going-in NOI is {sig.get('going_in_noi_pct_of_stabilized', '?')} of "
@@ -339,7 +339,7 @@ def _v(can: dict, c: str):
 def _traj_pts(t: dict | None) -> dict | None:
     if not t:
         return None
-    return {"going_in": t.get("going_in"), "stabilized": t.get("stabilized"),
+    return {"going_in": t.get("going_in"),
             "exit": t.get("exit"), "by_year": t.get("by_year"), "source": t.get("source")}
 
 
@@ -444,7 +444,6 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
             "levered_irr": _v(can, "levered_irr"), "unlevered_irr": _v(can, "unlevered_irr"),
             "levered_em": _v(can, "equity_multiple"),
             "noi_bridge": {"going_in": (traj.get("noi") or {}).get("going_in"),
-                           "stabilized": (traj.get("noi") or {}).get("stabilized"),
                            "exit": (traj.get("noi") or {}).get("exit")},
             "going_in_cap": _v(can, "going_in_cap"), "exit_cap": _v(can, "exit_cap"),
             "sale_price": _v(can, "sale_price"), "yield_on_cost": _v(can, "yield_on_cost"),
@@ -548,7 +547,7 @@ def render_fact_sheet(fs: dict) -> str:
     L.append(f"TARGETS:  levered IRR {P(t['levered_irr'])} · EM {t['levered_em']} · "
              f"exit {M(t['sale_price'])} @ {P(t['exit_cap'])} cap")
     nb = t["noi_bridge"]
-    L.append(f"  NOI bridge: {M(nb['going_in'])} -> {M(nb['stabilized'])} -> {M(nb['exit'])} exit")
+    L.append(f"  NOI bridge: {M(nb['going_in'])} -> {M(nb['exit'])} exit")
     occ = fs["operating"].get("occupancy")
     if occ:
         L.append(f"  occupancy: {P(occ['going_in'])} going-in -> {P(occ['stabilized'])} "

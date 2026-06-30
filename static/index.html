@@ -285,7 +285,7 @@ function renderSummary(fs){
     kv('DSCR health',dscrText(t.dscr_health)),
   );
   const ops=inline(
-    kv('NOI (in→stab→exit)',`${fmtM(noi.going_in)} → ${fmtM(noi.stabilized)} → ${fmtM(noi.exit)}`),
+    kv('NOI (in→exit)',`${fmtM(noi.going_in)} → ${fmtM(noi.exit)}`),
     kv('Occupancy (in→stab)',occStr),
   );
   $('facts').innerHTML=`<h3>Deal</h3>${deal}<h3>Returns</h3>${ret}`+
