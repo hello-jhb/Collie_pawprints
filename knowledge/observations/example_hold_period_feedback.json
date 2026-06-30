@@ -1,0 +1,31 @@
+{
+  "observation_id": "example_hold_period_feedback",
+  "created_at": "2026-06-10",
+  "status": "accepted_candidate",
+  "review": {
+    "source": "user_feedback",
+    "reviewer": "human",
+    "verified": true,
+    "notes": "Example observation showing how a missed metric becomes promotion evidence instead of a direct runtime rule."
+  },
+  "file_context": {
+    "file_type": "retail_acquisition",
+    "model_pattern_id": "retail_acquisition_v1",
+    "source_file_hash": null
+  },
+  "observation": {
+    "metric": "hold_period",
+    "engine_result": "missing",
+    "actual_source": {
+      "sheet": "Assumption",
+      "cell": "D4"
+    },
+    "actual_value": "60 months",
+    "lesson": "hold_period_stored_in_months"
+  },
+  "candidate_rule": {
+    "rule_id": "hold_period_gt_24_means_months",
+    "proposed_change": "If hold_period numeric value is greater than 24 and no unit is explicit, treat the value as months and normalize to years.",
+    "promotion_status": "candidate"
+  }
+}

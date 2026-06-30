@@ -1,0 +1,143 @@
+{
+  "version": "2026-06-10.1",
+  "description": "Reusable workbook-structure patterns distilled from reviewed underwriting files. These are loaded at runtime; raw per-deal facts stay in analyst bundles.",
+  "promotion_policy": {
+    "candidate_min_evidence_count": 3,
+    "active_min_evidence_count": 7,
+    "max_contradiction_rate": 0.15,
+    "trusted_evidence_sources": [
+      "analyst_verified",
+      "user_feedback",
+      "gold_fixture"
+    ],
+    "notes": "GPT may propose observations, but patterns become active only after verified evidence accumulates and conflicting evidence remains low."
+  },
+  "patterns": [
+    {
+      "pattern_id": "generic_acquisition_underwriting_v1",
+      "status": "candidate",
+      "model_type": "acquisition_underwriting",
+      "common_structure": {
+        "summary": [
+          "One Pager",
+          "Executive Summary",
+          "Investment Summary",
+          "Key UW Metrics",
+          "Summary"
+        ],
+        "inputs": [
+          "General Information",
+          "Assumption",
+          "Assumptions",
+          "Inputs"
+        ],
+        "cash_flow": [
+          "Proforma",
+          "Pro Forma",
+          "Cash Flow",
+          "NOI"
+        ],
+        "sources_uses": [
+          "Sources & Uses",
+          "S&U",
+          "Capitalization",
+          "Budget"
+        ],
+        "debt": [
+          "Debt",
+          "Debt Information",
+          "Loan",
+          "Financing"
+        ],
+        "returns": [
+          "Returns",
+          "Key UW",
+          "Waterfall"
+        ]
+      },
+      "signals": {
+        "sheet_names_any": [
+          "Assumption",
+          "Proforma",
+          "Cash Flow",
+          "Sources & Uses",
+          "Debt Information"
+        ],
+        "metric_labels_any": [
+          "Purchase Price",
+          "Going-In Cap Rate",
+          "Levered IRR",
+          "Exit Cap Rate"
+        ]
+      },
+      "observations": [
+        {
+          "fact": "inputs_tabs_often_contain_deal_basis_and_debt_assumptions",
+          "confidence": 0.8
+        },
+        {
+          "fact": "summary_tabs_often_hold_authoritative_deal_level_metrics",
+          "confidence": 0.85
+        }
+      ],
+      "evidence": {
+        "evidence_count": 0,
+        "contradiction_count": 0,
+        "last_reviewed_at": null
+      }
+    },
+    {
+      "pattern_id": "retail_acquisition_v1",
+      "status": "candidate",
+      "model_type": "retail_acquisition",
+      "common_structure": {
+        "summary": [
+          "One Pager",
+          "Key UW Metrics",
+          "Investment Summary"
+        ],
+        "inputs": [
+          "Assumption",
+          "Assumptions",
+          "General Information"
+        ],
+        "cash_flow": [
+          "Proforma",
+          "Cash Flow",
+          "NOI"
+        ]
+      },
+      "signals": {
+        "sheet_names_any": [
+          "Assumption",
+          "Proforma",
+          "Cash Flow"
+        ],
+        "property_type_any": [
+          "Retail",
+          "Shopping Center",
+          "GLA"
+        ]
+      },
+      "observations": [
+        {
+          "fact": "debt_assumptions_in_inputs",
+          "confidence": 0.95
+        },
+        {
+          "fact": "hold_period_stored_in_months",
+          "confidence": 0.95
+        },
+        {
+          "fact": "noi_trajectory_monthly",
+          "confidence": 0.9
+        }
+      ],
+      "evidence": {
+        "evidence_count": 1,
+        "contradiction_count": 0,
+        "last_reviewed_at": "2026-06-10"
+      }
+    }
+  ]
+}

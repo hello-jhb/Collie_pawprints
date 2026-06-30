@@ -1,0 +1,60 @@
+{
+  "version": "2026-06-10.1",
+  "description": "Reusable interpretation patterns for business-plan narrative. These help GPT analysis after extraction and validation; they do not create verified facts.",
+  "promotion_policy": {
+    "candidate_min_evidence_count": 3,
+    "active_min_evidence_count": 7,
+    "max_contradiction_rate": 0.2,
+    "notes": "Business-plan patterns are interpretive, so they should be cited as analysis, not SSOT facts."
+  },
+  "patterns": [
+    {
+      "pattern_id": "hotel_rate_growth_strategy_v1",
+      "status": "candidate",
+      "property_type": "hotel",
+      "signals": [
+        {
+          "pattern": "occupancy_flat_revpar_up",
+          "interpretation": "rate_growth_strategy"
+        },
+        {
+          "pattern": "adr_growth_exceeds_occupancy_growth",
+          "interpretation": "pricing_power_or_renovation_rate_lift"
+        }
+      ],
+      "analysis_guidance": [
+        "Separate occupancy recovery from ADR-led RevPAR growth",
+        "Check whether capex timing supports the rate-growth story"
+      ],
+      "evidence": {
+        "evidence_count": 0,
+        "contradiction_count": 0,
+        "last_reviewed_at": null
+      }
+    },
+    {
+      "pattern_id": "retail_leasing_uplift_strategy_v1",
+      "status": "candidate",
+      "property_type": "retail",
+      "signals": [
+        {
+          "pattern": "occupancy_up_noi_up",
+          "interpretation": "lease_up_strategy"
+        },
+        {
+          "pattern": "rent_psf_growth_with_stable_occupancy",
+          "interpretation": "mark_to_market_strategy"
+        }
+      ],
+      "analysis_guidance": [
+        "Check anchor tenancy and sales productivity before treating rent growth as durable",
+        "Separate lease-up NOI growth from expense-margin improvements"
+      ],
+      "evidence": {
+        "evidence_count": 0,
+        "contradiction_count": 0,
+        "last_reviewed_at": null
+      }
+    }
+  ]
+}

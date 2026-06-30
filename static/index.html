@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Collie — Paw Prints</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
+    --line:#e6e8ec; --accent:#6d5bff; --accent-bg:#eaf1fb; --good:#17742a; --good-bg:#e7f4ea;
+    --radius:12px; --serif:Georgia,"Times New Roman",serif; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+
+  /* card layout */
+  .card-frame{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;min-height:600px}
+  .card-header{display:flex;align-items:center;justify-content:space-between;padding:24px 32px;border-bottom:1px solid var(--line)}
+  .card-title{font-size:14px;font-weight:600;letter-spacing:.05em;color:var(--ink)}
+  .card-tag{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
+  .card-content{display:grid;grid-template-columns:1fr;padding:32px;flex:1}
+
+  /* paw prints content */
+  .paw-prints-section{text-align:left}
+  .paw-prints-headline{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 24px}
+  .paw-prints-title{font-family:var(--serif);font-size:28px;font-weight:600;color:var(--ink);margin:0 0 24px;display:none}
+  .paw-prints-desc{font-size:13px;line-height:1.7;color:var(--muted);margin:0 0 32px;max-width:520px}
+
+  /* upload section */
+  .upload-section{margin:24px 0}
+  .upload-section.highlight{padding:20px;background:rgba(109,91,255,.04);border:1px solid rgba(109,91,255,.15);border-radius:8px;margin:24px 0}
+  .upload-label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
+  .upload-helper{font-size:12px;color:var(--muted);margin:8px 0 0}
+
+  /* drop zone */
+  .drop{border:1.5px dashed #bcc0ca;border-radius:8px;padding:24px;margin:12px 0;cursor:pointer;transition:.15s;background:#f9f9fb;text-align:center}
+  .drop:hover,.drop.over{border-color:var(--accent);background:rgba(109,91,255,.03)}
+  .drop .text{font-size:13px;color:var(--hint)}
+  .drop .text u{text-decoration:underline;cursor:pointer}
+
+  /* buttons */
+  button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:9px 18px;cursor:pointer;font-weight:600;transition:.15s;letter-spacing:.02em}
+  button:hover:not(:disabled){background:#5835e0}
+  button:disabled{opacity:.4;cursor:not-allowed}
+
+  .btn-secondary{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+  .btn-secondary:hover:not(:disabled){background:rgba(109,91,255,.05)}
+
+  .upload-actions{display:flex;gap:12px;margin-top:20px}
+
+  /* progress circle */
+  .progress-container{display:none;margin-top:24px;align-items:center;gap:12px}
+  .progress-container.active{display:flex}
+  .progress-circle{width:24px;height:24px;border-radius:50%;border:2px solid rgba(109,91,255,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .progress-label{font-size:12px;color:var(--muted);font-weight:500}
+
+  .filechip{font-size:12px;background:#f0f2f5;border-radius:6px;padding:4px 8px;display:inline-block;margin:4px 4px 0;font-weight:500}
+  .muted{color:var(--muted)} .hint{color:var(--hint)}
+
+  /* deal layout */
+  .layout{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start}
+  .col-main{min-width:0}
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .head .name{font-size:20px;font-weight:600}
+  .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;margin-bottom:16px;font-family:var(--serif)}
+  .memo h2{font-family:var(--serif);font-weight:500;font-size:16px;color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
+  .memo h2:first-child{margin-top:0}
+  .memo p,.memo li{font-size:15.5px;line-height:1.65}
+  .memo ul{margin:6px 0;padding-left:20px}
+  .memo strong{font-weight:600}
+
+  .cardlabel{font-family:var(--serif);font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px 2px}
+  .subid{color:var(--muted);font-size:13.5px;margin:-6px 0 14px 2px}
+  .subid .na{color:var(--hint)}
+  .facts{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px;margin-bottom:14px}
+  .facts h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--hint);font-weight:600;margin:18px 0 6px}
+  .facts h3:first-child{margin-top:0}
+  .facts .inline{font-size:14.5px;line-height:1.7;margin:0 0 4px;color:var(--ink)}
+  .facts .inline .k{color:var(--muted)}
+  .facts .inline .v{font-weight:600}
+  .facts .inline .v.na{color:var(--hint);font-weight:500}
+  .facts .inline .sep{color:var(--hint);margin:0 9px}
+
+  details.detail{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 16px;margin-top:14px}
+  details.detail summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none}
+  details.detail summary::-webkit-details-marker{display:none}
+  .detail-body{font-size:14px;margin-top:10px}
+  .detail-body h4{margin:14px 0 4px;font-size:14px} .detail-body ul{padding-left:18px;margin:4px 0}
+
+  /* chat rail */
+  .chat{position:sticky;top:20px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;height:calc(100vh - 110px);min-height:420px}
+  .chat .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted)}
+  .chat .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .bub{max-width:88%;font-size:13.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
+  .bub.u{align-self:flex-end;background:var(--accent-bg);color:var(--accent)}
+  .bub.a{align-self:flex-start;background:#f3f4f6}
+  .chat .in{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
+  .chat .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .chat .in button{padding:8px 12px}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}.chat{height:auto;position:static}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">Collie<span>.</span></div>
+  <div id="topright" class="hint" style="font-size:13px">grounded investment reads</div>
+</div>
+
+<div class="wrap">
+  <div id="uploadView" class="card-frame">
+    <div class="card-header">
+      <div class="card-title">Paw Prints v 1.0</div>
+    </div>
+    <div class="card-content">
+      <div class="paw-prints-section">
+        <p class="paw-prints-headline">Read the story behind a real estate investment.</p>
+        <h1 class="paw-prints-title">Paw Prints</h1>
+        <p class="paw-prints-desc">Paw Prints reads an underwriting model the way an investment professional would — extracting the assumptions, understanding the investment thesis, and establishing the financial baseline. Add operating statements to compare actual performance against the original plan and quickly identify where the story has changed.</p>
+
+        <div class="upload-section highlight">
+          <div class="upload-label">Upload an underwriting model</div>
+          <div id="drop" class="drop">
+            <div class="text">Drop an Excel file here, or <u>browse</u></div>
+            <div id="files" style="margin-top:6px"></div>
+          </div>
+          <div class="upload-helper">Build the investment baseline from the original deal model.</div>
+          <input id="model" type="file" accept=".xlsx,.xls" hidden />
+        </div>
+
+        <div class="upload-section">
+          <button class="btn-secondary" id="addActuals">+ Add operating statements</button>
+          <div class="upload-helper">Compare actual performance against the original plan.</div>
+          <div id="actualsChips" style="margin-top:8px"></div>
+          <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
+        </div>
+
+        <div class="upload-actions">
+          <button id="go" disabled>Analyze</button>
+        </div>
+        <div id="progressContainer" class="progress-container">
+          <div class="progress-circle"></div>
+          <div class="progress-label" id="progressLabel">Reading model…</div>
+        </div>
+        <div id="uErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="dealView" style="display:none">
+    <div class="head">
+      <span class="name" id="dName"></span>
+      <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
+      <span class="badge" id="aBadge"></span>
+      <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
+      <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
+    </div>
+    <div class="layout">
+      <div class="col-main">
+        <div class="subid" id="subid"></div>
+        <div class="cardlabel">Investment Summary</div>
+        <div class="facts" id="facts"></div>
+        <div class="cardlabel">Investment Snapshot</div>
+        <div class="memo" id="memo"></div>
+        <details class="detail">
+          <summary>▸ Engine Detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
+          <div class="detail-body" id="detail"></div>
+        </details>
+      </div>
+      <div class="chat">
+        <div class="ch">Ask about this deal</div>
+        <div class="msgs" id="msgs"><div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div></div>
+        <div class="in"><input id="q" placeholder="Ask a question" /><button id="send">Send</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+let SID=null, FS=null;
+const fmtM=v=>v==null||isNaN(v)?'—':(Math.abs(v)>=1e6?'$'+(v/1e6).toFixed(1)+'M':Math.abs(v)>=1e3?'$'+Math.round(v/1e3)+'k':'$'+Math.round(v).toLocaleString());
+const fmtP=v=>v==null||isNaN(v)?'—':(v*100).toFixed(1)+'%';
+const fmtX=v=>v==null||isNaN(v)?'—':(+v).toFixed(2)+'×';
+const isNA=v=>v==='—'||(typeof v==='string'&&v.includes('na">'));
+const kv=(lab,val)=>`<span class="kv"><span class="k">${lab}</span> <span class="v${isNA(val)?' na':''}">${val}</span></span>`;
+const inline=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}</div>`;
+
+// upload wiring
+const model=$('model'), actuals=$('actuals');
+$('drop').onclick=()=>model.click();
+$('addActuals').onclick=e=>{e.stopPropagation();actuals.click();};
+['dragover','dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.toggle('over',ev==='dragover');if(ev==='drop'){model.files=e.dataTransfer.files;refreshFiles();}}));
+model.onchange=actuals.onchange=refreshFiles;
+function refreshFiles(){
+  let modelChip='';
+  if(model.files[0]) modelChip=`<span class="filechip">📄 ${model.files[0].name}</span>`;
+  $('files').innerHTML=modelChip;
+
+  let actualsHtml='';
+  for(const f of actuals.files) actualsHtml+=`<span class="filechip">📊 ${f.name}</span>`;
+  $('actualsChips').innerHTML=actualsHtml;
+
+  $('go').disabled=!model.files[0];
+}
+$('go').onclick=analyze;
+$('reset').onclick=()=>{location.reload();};
+
+async function analyze(){
+  $('uErr').textContent=''; $('go').disabled=true; $('go').textContent='Reading…';
+  const progressContainer=$('progressContainer');
+  const progressLabel=$('progressLabel');
+
+  // Show progress spinner
+  progressContainer.classList.add('active');
+
+  const fd=new FormData(); fd.append('model',model.files[0]);
+  for(const f of actuals.files) fd.append('actuals',f);
+  try{
+    const r=await fetch('/api/analyze',{method:'POST',body:fd});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||('HTTP '+r.status));}
+    progressLabel.textContent='Analysis complete';
+    await new Promise(r=>setTimeout(r,600));
+    renderDeal(await r.json());
+  }catch(e){
+    progressContainer.classList.remove('active');
+    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Analyze';
+  }
+}
+
+function idVal(f){return (f&&f.status!=='not_found'&&f.value!=null)?f:null;}
+function dscrText(dh){
+  if(!dh||!dh.available) return '<span class="na">n/a — no debt-service flow</span>';
+  if(dh.healthy) return '✓ Healthy'+(dh.min_dscr_post_stab!=null?` (≥1.2×, min ${(+dh.min_dscr_post_stab).toFixed(2)}×)`:'');
+  return `⚠ Breach &lt;1.2× for ${dh.breach_run_months} mo`;
+}
+function rateText(s){
+  const r=s.rate||{};
+  if(s.financing==='floating') return 'Floating'+(r.spread!=null?` · spread ${fmtP(r.spread)}`:'')+(r.floor!=null?` · floor ${fmtP(r.floor)}`:'')+(r.capped?' · capped':' · uncapped');
+  if(s.financing) return s.financing.charAt(0).toUpperCase()+s.financing.slice(1);
+  return '—';
+}
+
+function renderDeal(d){
+  SID=d.session_id; FS=d.fact_sheet;
+  const fname=(model.files[0]?.name||'Deal').replace(/\.(xlsx|xls)$/i,'');
+  $('uploadView').style.display='none'; $('dealView').style.display='block';
+  const prop=FS.deal.property||{};
+  const nm=idVal(prop.name);
+  $('dName').textContent = nm ? nm.value : fname;
+  // property subtitle: Type · Size (state misses explicitly)
+  const ty=idVal(prop.type), sz=idVal(prop.size);
+  const tyS = ty?ty.value:'<span class="na">type not found</span>';
+  const szS = sz?`${sz.value.amount.toLocaleString()} ${sz.value.unit}`:'<span class="na">size not found</span>';
+  $('subid').innerHTML = prop ? `${tyS} · ${szS}` : '';
+  const a=FS.deal.archetype; $('aBadge').textContent=a.label;
+  $('modeBadge').textContent=d.mode==='performance'?'performance read':'acquisition read';
+  renderSummary(FS);
+  $('memo').innerHTML=marked.parse(d.read_md||'');
+  renderDetail(d, FS);
+}
+
+function renderSummary(fs){
+  const t=fs.deal.targets||{}, s=fs.deal.strategy||{}, op=fs.operating||{};
+  const noi=op.noi||{}, occ=op.occupancy;
+  const ltv = t.ltv!=null?` (${fmtP(t.ltv)} LTV)`:'';
+  const exit = `${fmtM(t.sale_price)}`+(t.exit_cap!=null?` @ ${fmtP(t.exit_cap)} cap`:'');
+  const occStr = (occ&&occ.going_in!=null)?`${fmtP(occ.going_in)} → ${fmtP(occ.stabilized)} stabilized`:'<span class="na">not found</span>';
+  const deal=inline(
+    kv('Acquisition price',fmtM(t.purchase_price)),
+    kv('Total investment',fmtM(t.total_cost)),
+    kv('Hold',(s.hold&&s.hold.months)?`${s.hold.months} mo`:'—'),
+    kv('Exit',exit),
+  );
+  const ret=inline(
+    kv('Unlevered IRR',fmtP(t.unlevered_irr)),
+    kv('Levered IRR',fmtP(t.levered_irr)),
+    kv('Equity multiple',fmtX(t.levered_em)),
+  );
+  const debt=inline(
+    kv('Total debt',fmtM(t.debt)+ltv),
+    kv('Interest rate',rateText(s)),
+    kv('DSCR health',dscrText(t.dscr_health)),
+  );
+  const ops=inline(
+    kv('NOI (in→stab→exit)',`${fmtM(noi.going_in)} → ${fmtM(noi.stabilized)} → ${fmtM(noi.exit)}`),
+    kv('Occupancy (in→stab)',occStr),
+  );
+  $('facts').innerHTML=`<h3>Deal</h3>${deal}<h3>Returns</h3>${ret}`+
+    `<h3>Debt &amp; coverage</h3>${debt}<h3>Operations</h3>${ops}`;
+}
+
+function renderDetail(d, fs){
+  const t=fs.deal.targets||{};
+  // Return on cost + levered CoC live HERE (stabilized), per the layout brief.
+  const extras = `<h4>Return on cost &amp; cash yield (stabilized)</h4><ul>`+
+    `<li>Yield on cost (stabilized): ${fmtP(t.yield_on_cost)}</li>`+
+    `<li>Levered cash-on-cash (stabilized): ${fmtP(t.leveraged_coc)}</li>`+
+    `<li>Annual debt service (stabilized): ${fmtM(t.debt_service_stabilized)}</li>`+
+    `<li>Levered cash flow (stabilized): ${fmtM(t.levered_cf_stabilized)}</li></ul>`;
+  $('detail').innerHTML = extras + marked.parse(d.detail_md||'_No detail available._');
+}
+
+// chat
+$('send').onclick=sendChat; $('q').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+async function sendChat(){
+  const q=$('q').value.trim(); if(!q||!SID)return;
+  $('q').value='';
+  add('u',q); const tmp=add('a','…');
+  try{
+    const fd=new FormData(); fd.append('session_id',SID); fd.append('message',q);
+    const r=await fetch('/api/chat',{method:'POST',body:fd});
+    const j=await r.json(); tmp.textContent=j.reply||j.error||'(no reply)';
+  }catch(e){tmp.textContent='Error: '+e.message;}
+}
+function add(role,text){const el=document.createElement('div');el.className='bub '+role;el.textContent=text;$('msgs').appendChild(el);$('msgs').scrollTop=1e9;return el;}
+</script>
+</body>
+</html>
