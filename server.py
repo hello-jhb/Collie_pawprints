@@ -15,7 +15,9 @@ Container:    see Dockerfile (uvicorn on $PORT)
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -24,6 +26,13 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+
+log = logging.getLogger("fb.server")
+if not log.handlers:
+    _h = logging.StreamHandler(sys.stdout)
+    _h.setFormatter(logging.Formatter("[fb.server] %(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
 
 app = FastAPI(title="Collie", version="0.1.0")
 
@@ -58,6 +67,7 @@ async def analyze(model: UploadFile = File(...),
     model_path.write_bytes(await model.read())
     workdir = Path(tempfile.mkdtemp(prefix="collie_"))
     actuals_paths = [await _save(workdir, a) for a in actuals if a and a.filename]
+    log.info("[%s] analyze START file=%s actuals=%d", sid, model.filename, len(actuals_paths))
 
     from deal_truth import build_deal_truth
     from deal_analysis import build_analysis
@@ -65,6 +75,8 @@ async def analyze(model: UploadFile = File(...),
 
     dt = build_deal_truth(model_path)
     if not dt.get("engine_found", True):
+        log.warning("[%s] analyze REJECTED — no validated cash-flow engine: %s",
+                   sid, dt.get("reason"))
         raise HTTPException(422, dt.get("reason", "no validated cash-flow engine in this workbook"))
     analysis = build_analysis(model_path, dt=dt)
 
@@ -74,11 +86,14 @@ async def analyze(model: UploadFile = File(...),
         perf = build_perf_vs_plan(model_path, actuals_paths)
         perf = perf if perf.get("ok") else None
 
-    read = build_investment_read(model_path, dt=dt, analysis=analysis, perf=perf)
-    fs = read.get("fact_sheet") or assemble_fact_sheet(model_path, dt=dt, analysis=analysis, perf=perf)
+    read = build_investment_read(model_path, dt=dt, analysis=analysis, perf=perf, analysis_id=sid)
+    fs = read.get("fact_sheet") or assemble_fact_sheet(model_path, dt=dt, analysis=analysis,
+                                                        perf=perf, analysis_id=sid)
+    log.info("[%s] analyze DONE mode=%s narrative_source=%s", sid, fs.get("mode"), read.get("source"))
 
     _SESSIONS[sid] = {"model_path": str(model_path), "model_filename": model_filename,
-                      "fact_sheet": fs, "history": None}
+                      "fact_sheet": fs, "read_md": read.get("md"),
+                      "read_source": read.get("source"), "history": None}
     return {"session_id": sid, "mode": fs.get("mode"),
             "read_md": read.get("md"), "detail_md": analysis.get("md"),
             "fact_sheet": fs}
@@ -167,15 +182,22 @@ def _sheet_catalog(fname: str) -> str:
             + "\n".join(lines) + "\n\n")
 
 
-def _chat_system(fs: dict, fname: str = "") -> str:
+def _chat_system(fs: dict, fname: str = "", read_md: str | None = None) -> str:
     from interpretation import render_fact_sheet
     catalog = _sheet_catalog(fname) if fname else ""
+    read_block = (
+        "\nYOUR OWN INVESTMENT READ (you already wrote this for this deal — stay "
+        "consistent with it; build on it in conversation, don't restate it verbatim):\n"
+        + read_md + "\n\n"
+    ) if read_md else ""
     return (
         "You are a sharp, curious asset manager with the deal's FULL underwriting workbook "
-        "open in front of you. You have TWO sources and must use BOTH:\n"
+        "open in front of you. You have THREE sources and must use them appropriately:\n"
         "  (A) the VALIDATED FACT SHEET below — a conflict-resolved, full-dollar SUMMARY of "
-        "the deal's economics (NOI, returns, capital stack, components), and\n"
-        "  (B) the LIVE WORKBOOK — everything else: rent roll, unit/tenant detail, property "
+        "the deal's economics (NOI, returns, capital stack, components),\n"
+        "  (B) the INVESTMENT READ below (if present) — the memo you already wrote on this "
+        "deal, with its own findings and judgment, and\n"
+        "  (C) the LIVE WORKBOOK — everything else: rent roll, unit/tenant detail, property "
         "info, leases, every assumption and schedule. The tabs are listed below; reach into "
         "them with list_sheets / search_file / read_sheet.\n\n"
         "Hard rules:\n"
@@ -195,8 +217,11 @@ def _chat_system(fs: dict, fname: str = "") -> str:
         "Treat file reads as lower-confidence than the fact sheet. Raw dollar cells may be in "
         "$000s — note units; counts are unscaled.\n"
         "5. For any return-impact / what-if math, call the what_if tool — never estimate.\n"
+        "6. Respect DATA CONFIDENCE in the fact sheet: a component marked T2-unfooted is a "
+        "single line item, not a footed total — hedge it accordingly rather than stating it "
+        "with T1 certainty.\n"
         "Never invent a number. Be concise, but be genuinely helpful — dig.\n\n"
-        + catalog + render_fact_sheet(fs))
+        + catalog + render_fact_sheet(fs) + "\n\n" + read_block).rstrip()
 
 
 @app.post("/api/chat")
@@ -213,10 +238,12 @@ async def chat(session_id: str = Form(...), message: str = Form(...)):
 
     if not sess.get("history"):
         sess["history"] = [{"role": "system",
-                            "content": _chat_system(sess["fact_sheet"], sess["model_filename"])}]
+                            "content": _chat_system(sess["fact_sheet"], sess["model_filename"],
+                                                    sess.get("read_md"))}]
     hist = sess["history"]
     hist.append({"role": "user", "content": message})
     fname = sess["model_filename"]
+    log.info("[%s] chat turn — message_chars=%d", session_id, len(message))
 
     for _ in range(6):
         try:
@@ -224,6 +251,7 @@ async def chat(session_id: str = Form(...), message: str = Form(...)):
                 model=MODEL, messages=hist, tools=_CHAT_TOOLS,
                 tool_choice="auto", temperature=0.2)
         except Exception as e:                             # pragma: no cover - defensive
+            log.warning("[%s] chat FAILED (%s: %s)", session_id, type(e).__name__, e)
             return {"reply": f"Chat failed: {type(e).__name__}: {e}"}
         msg = resp.choices[0].message
         rec: dict[str, Any] = {"role": "assistant", "content": msg.content}
@@ -234,15 +262,18 @@ async def chat(session_id: str = Form(...), message: str = Form(...)):
                                  for tc in msg.tool_calls]
         hist.append(rec)
         if not msg.tool_calls:
+            log.info("[%s] chat replied (no further tool calls)", session_id)
             return {"reply": (msg.content or "").strip() or "I couldn't find that."}
         for tc in msg.tool_calls:
             try:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
+            log.info("[%s] chat tool_call %s(%s)", session_id, tc.function.name, args)
             res = _chat_dispatch(tc.function.name, args, fname)
             hist.append({"role": "tool", "tool_call_id": tc.id,
                          "content": json.dumps(res, default=str)[:4000]})
+    log.warning("[%s] chat exhausted tool-call budget without a final reply", session_id)
     return {"reply": "I looked but couldn't pin that down — try naming the sheet."}
 
 

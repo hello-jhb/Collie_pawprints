@@ -13,8 +13,17 @@ consumes `assemble_fact_sheet(...)` — it is not wired here yet.
 """
 from __future__ import annotations
 
+import logging
+import sys
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("fb.interpretation")
+if not log.handlers:
+    h = logging.StreamHandler(sys.stdout)
+    h.setFormatter(logging.Formatter("[fb.interpretation] %(asctime)s %(levelname)s %(message)s"))
+    log.addHandler(h)
+    log.setLevel(logging.INFO)
 
 FACT_SHEET_VERSION = "2026-06-28.1"
 
@@ -403,7 +412,8 @@ def _cashflow_metrics(file_path, dt: dict) -> dict[str, Any]:
 
 def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
                         analysis: dict | None = None,
-                        perf: dict | None = None) -> dict[str, Any]:
+                        perf: dict | None = None,
+                        analysis_id: str | None = None) -> dict[str, Any]:
     """Aggregate Deal Truth + Deal Analysis + (optional) perf-vs-plan into the one
     structured object the GPT layer consumes. Deterministic; T1 facts + T2 footed
     components + archetype + guardrails + confidence + mode."""
@@ -412,6 +422,7 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
         from deal_truth import build_deal_truth
         dt = build_deal_truth(file_path)
     if not dt.get("engine_found", True):
+        log.warning("[%s] engine_not_found reason=%s", analysis_id, dt.get("reason"))
         return {"ok": False, "reason": dt.get("reason", "cash-flow engine not found"),
                 "version": FACT_SHEET_VERSION}
     if analysis is None:
@@ -515,6 +526,13 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
     # Claims (computed) + their derived guardrails — the binding layer GPT obeys.
     fs["claims"] = build_claims(fs, perf)
     fs["guardrails"] = guardrails + [c["guardrail"] for c in fs["claims"] if c.get("guardrail")]
+
+    log.info("[%s] fact sheet mode=%s archetype=%s(%s) claims=%d guardrails=%d "
+             "data_coverage=%s", analysis_id, mode, archetype.get("label"),
+             archetype.get("confidence"), len(fs["claims"]), len(fs["guardrails"]),
+             confidence["data_coverage"])
+    for msg in fs["guardrails"]:
+        log.info("[%s] guardrail: %s", analysis_id, msg)
     return fs
 
 
@@ -567,6 +585,11 @@ def render_fact_sheet(fs: dict) -> str:
     else:
         L.append("  DSCR health: not available from model (no debt-service flow)")
     L.append(f"  cost {M(t['total_cost'])} · debt {M(t['debt'])} · equity {M(t['equity'])} · LTC {P(t['ltc'])}")
+    dc = fs.get("confidence", {}).get("data_coverage") or {}
+    if dc:
+        L.append("DATA CONFIDENCE: " + " · ".join(f"{k}: {v}" for k, v in dc.items())
+                 + "  (T1=validated cash-flow/spine; T2-footed=components sum to the "
+                   "total; T2-unfooted=a single line, not a footed total — hedge it)")
     comps = fs["operating"]["components"]
     for c in ("opex", "revenue"):
         cc = comps.get(c)
@@ -621,6 +644,9 @@ HARD RULES (a violation makes the read worthless):
 8. Write investment prose, not a metric list. Tight. An analyst's voice, not a dashboard.
 9. Recommendations are JUDGMENT — phrase them as such, proportional to the issue.
 10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance.
+11. Respect DATA CONFIDENCE. A component marked T2-unfooted is a single line item, not a
+    footed total — hedge it ("based on a single line, not a footed total") rather than stating
+    it with the same certainty as a T1 or T2-footed figure.
 
 OUTPUT — exactly these three sections, markdown headers:
 ## Investment Snapshot
@@ -661,22 +687,82 @@ def _deterministic_read(fs: dict) -> str:
     return "\n".join(out)
 
 
-def build_investment_read(file_path, dt=None, analysis=None, perf=None) -> dict[str, Any]:
+def _numeric_tokens(text: str) -> list[tuple[str, float]]:
+    """Pull ($-amount / percent / bare-number) tokens out of prose, normalized to a
+    comparable float: $1.2M and $1,200,000 both -> ("usd", 1200000.0); 17.5% and
+    17.50% both -> ("pct", 17.5). Used only to sanity-check GPT's narration against
+    the fact sheet it was given — not used for any extraction or computation."""
+    import re
+    pattern = re.compile(r'\$?-?\d[\d,]*\.?\d*[%MmKkBb]?(?![a-zA-Z])')
+    out: list[tuple[str, float]] = []
+    for m in pattern.finditer(text):
+        raw = m.group()
+        if not any(ch.isdigit() for ch in raw):
+            continue
+        is_pct = raw.endswith('%')
+        is_usd = raw.startswith('$')
+        suffix = raw[-1].lower() if (not is_pct and raw[-1].lower() in 'mkb') else None
+        core = raw[1:] if is_usd else raw
+        core = core[:-1] if (is_pct or suffix) else core
+        try:
+            val = float(core.replace(',', ''))
+        except ValueError:
+            continue
+        if suffix == 'm':
+            val *= 1e6
+        elif suffix == 'k':
+            val *= 1e3
+        elif suffix == 'b':
+            val *= 1e9
+        kind = "pct" if is_pct else ("usd" if (is_usd or suffix) else "num")
+        if kind == "num" and abs(val) < 1000:
+            continue                                       # list numbering / small counts, not facts
+        out.append((kind, val))
+    return out
+
+
+def _numbers_match(a: float, b: float) -> bool:
+    if a == b:
+        return True
+    scale = max(abs(a), abs(b), 1.0)
+    return abs(a - b) <= max(0.01 * scale, 0.5)
+
+
+def _check_numeric_grounding(md: str, fs_text: str, analysis_id: str | None) -> None:
+    """Warning-only: flag (don't block) any number GPT's narration states that doesn't
+    trace back to the fact sheet it was given, after normalizing $/%/K/M/B formatting."""
+    fs_nums = _numeric_tokens(fs_text)
+    unsupported = [(k, v) for k, v in _numeric_tokens(md)
+                  if not any(k == fk and _numbers_match(v, fv) for fk, fv in fs_nums)]
+    if unsupported:
+        log.warning("[%s] investment read cites %d number(s) not traced to the fact "
+                    "sheet (warning only, response not blocked): %s",
+                    analysis_id, len(unsupported), unsupported[:10])
+
+
+def build_investment_read(file_path, dt=None, analysis=None, perf=None,
+                          analysis_id: str | None = None) -> dict[str, Any]:
     """The Investment Read artifact. Assembles the fact sheet, then GPT narrates it
     under the binding guardrails (deterministic fallback when no key)."""
-    fs = assemble_fact_sheet(file_path, dt=dt, analysis=analysis, perf=perf)
+    fs = assemble_fact_sheet(file_path, dt=dt, analysis=analysis, perf=perf,
+                             analysis_id=analysis_id)
     if not fs.get("ok"):
         return {"ok": False, "reason": fs.get("reason"),
                 "md": f"> Investment read unavailable: {fs.get('reason')}"}
     from scenarios._llm import llm_available, complete
     if not llm_available():
+        log.info("[%s] investment read source=deterministic (no API key)", analysis_id)
         return {"ok": True, "source": "deterministic", "fact_sheet": fs,
                 "md": _deterministic_read(fs)}
     try:
         md = complete(_SYSTEM_PROMPT, _prompt_payload(fs), temperature=0.2)
     except Exception as e:                                  # pragma: no cover - defensive
+        log.warning("[%s] investment read GPT call failed (%s: %s); falling back to "
+                    "deterministic", analysis_id, type(e).__name__, e)
         return {"ok": True, "source": "deterministic", "fact_sheet": fs,
                 "md": _deterministic_read(fs), "note": f"{type(e).__name__}: {e}"}
+    log.info("[%s] investment read source=gpt", analysis_id)
+    _check_numeric_grounding(md, render_fact_sheet(fs), analysis_id)
     return {"ok": True, "source": "gpt", "fact_sheet": fs, "md": md}
 
 

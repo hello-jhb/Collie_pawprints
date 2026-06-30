@@ -105,43 +105,6 @@ def _iso(s: Any) -> _dt.date | None:
 # 1. Cash-flow oracle
 # ---------------------------------------------------------------------------
 
-def _candidate_streams(tables: list[dict]) -> list[dict]:
-    """Every cash-flow-like row across cashflow tables, as dated flow streams.
-    A candidate must be a real investment stream: enough periods AND a sign
-    change (an outflow then inflows)."""
-    streams: list[dict] = []
-    for t in tables:
-        if t.get("table_type") not in ("cashflow_rollup", "monthly_table", "annual_table"):
-            continue
-        for r in t.get("rows", []):
-            label = (r.get("label") or "").strip()
-            concept = _concept_of(label)
-            looks_cf = concept in ("levered_cf", "unlevered_cf") or "cash flow" in label.lower()
-            if not looks_cf:
-                continue
-            vbp = r.get("values_by_period") or {}
-            flows = sorted((_iso(d), v) for d, v in vbp.items()
-                           if _iso(d) and isinstance(v, (int, float)) and not isinstance(v, bool))
-            if len(flows) < 4:
-                continue
-            if not (any(f > 0 for _, f in flows) and any(f < 0 for _, f in flows)):
-                continue
-            x = xirr(flows)
-            if x is None:
-                continue
-            infl = sum(v for _, v in flows if v > 0)
-            outf = sum(v for _, v in flows if v < 0)
-            streams.append({
-                "sheet": t["sheet"], "row": r.get("row"), "label": label,
-                "concept": concept, "periodicity": t.get("periodicity"),
-                "flows": flows, "xirr": x,
-                "em": (infl / abs(outf)) if outf else None,
-                "initial_outflow": min((f for _, f in flows), default=0.0),
-                "n_periods": len(flows),
-            })
-    return streams
-
-
 def _leg_from_label(label: str) -> str | None:
     """Levered / unlevered from a label's own words (reliable at the row level)."""
     l = label.lower()
@@ -150,56 +113,6 @@ def _leg_from_label(label: str) -> str | None:
     if "lever" in l or "equity" in l:        # 'leveraged', 'equity net cash flow'
         return "levered"
     return None
-
-
-def run_oracle(m: dict, tables: list[dict]) -> dict:
-    """Validate returns by recomputing them from the cash-flow streams.
-
-    Returns {"levered": {...}|None, "unlevered": {...}|None, "candidates": [...]}.
-    For each leg: the canonical stream (closest XIRR to the stated IRR), the
-    recomputed irr/em, the stated value it matched, and `validated`."""
-    streams = _candidate_streams(tables)
-
-    # All stated IRRs the model prints, leg-AGNOSTIC (fraction form, no ~0 noise).
-    # We validate against these but take the LEG from each stream's own row label,
-    # which is reliable even when a summary's IRR cell was mis-binned upstream.
-    stated_vals: list[float] = []
-    for concept in ("levered_irr", "unlevered_irr"):
-        for e in m["candidates"].get(concept, []):
-            v = float(e["value"])
-            if -0.5 <= v <= 1.5 and abs(v) >= 1e-4:
-                stated_vals.append(v)
-
-    out: dict[str, Any] = {"candidates": streams, "levered": None, "unlevered": None}
-    for leg in ("levered", "unlevered"):
-        leg_streams = [s for s in streams if _leg_from_label(s["label"]) == leg]
-        if not leg_streams or not stated_vals:
-            continue
-        # the leg-stream whose XIRR best matches ANY stated IRR
-        best, best_err, target = None, None, None
-        for s in leg_streams:
-            closest = min(stated_vals, key=lambda t: abs(s["xirr"] - t))
-            err = abs(s["xirr"] - closest)
-            if best is None or err < best_err:
-                best, best_err, target = s, err, closest
-        out[leg] = {
-            "sheet": best["sheet"], "row": best["row"], "label": best["label"],
-            "recomputed_irr": round(best["xirr"], 4),
-            "recomputed_em": round(best["em"], 2) if best["em"] is not None else None,
-            "stated_irr": round(target, 4),
-            "validated": best_err <= _IRR_TOL,
-            "match_err_bps": round(best_err * 10000, 1),
-            "initial_outflow": best["initial_outflow"],
-            "flows": best["flows"],
-            "periodicity": best["periodicity"],
-        }
-
-    # Consistency: the unlevered stream invests more equity-equivalent capital
-    # (no debt), so |unlevered initial outflow| should exceed |levered|.
-    lev, unlev = out.get("levered"), out.get("unlevered")
-    if lev and unlev:
-        out["leg_order_ok"] = abs(unlev["initial_outflow"]) >= abs(lev["initial_outflow"])
-    return out
 
 
 # ---------------------------------------------------------------------------
