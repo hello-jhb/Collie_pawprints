@@ -33,7 +33,7 @@ AAM_GROUPS: dict[str, list[str]] = {
     "Timing":   ["purchase_date", "hold_period", "exit_date"],
     # Exit Value is the exit-side pricing anchor: Exit NOI is DERIVED from it
     # (Exit NOI = Exit Value × Exit Cap Rate), mirroring going-in NOI = Purchase
-    # Price × Going-in Cap Rate. See _derive_noi_from_pricing in aam_extractor.
+    # Price × Going-in Cap Rate.
     "Return":   ["exit_value_terminal_value", "exit_cap_rate",
                  "levered_irr", "equity_multiple"],
 }

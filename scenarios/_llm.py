@@ -6,11 +6,9 @@ import json
 import logging
 import os
 import sys
-import streamlit as st
 from openai import OpenAI
 from typing import Any
 
-# Logger that writes to stdout so messages appear in Streamlit Cloud logs.
 log = logging.getLogger("fb.llm")
 if not log.handlers:
     h = logging.StreamHandler(sys.stdout)
@@ -20,11 +18,7 @@ if not log.handlers:
 
 
 def _get_api_key() -> str | None:
-    try:
-        key = st.secrets.get("OPENAI_API_KEY", None)
-    except Exception:
-        key = None
-    return key or os.getenv("OPENAI_API_KEY")
+    return os.getenv("OPENAI_API_KEY")
 
 
 _client: OpenAI | None = None
@@ -33,12 +27,10 @@ _client_api_key: str | None = None
 
 def get_client() -> OpenAI | None:
     """
-    Return a live OpenAI client for the current Streamlit run.
+    Return a live OpenAI client, re-created if the API key env var changes.
 
-    Streamlit re-executes app modules on rerun, while helper modules imported by
-    other modules can stay cached. A client created once at import time can
-    therefore get stuck as None if secrets/env were temporarily unavailable, or
-    keep using an old key after a reconnect. Resolve it lazily instead.
+    Resolved lazily rather than once at import time, since a client created
+    before OPENAI_API_KEY is set would otherwise get stuck as None.
     """
     global _client, _client_api_key
 
@@ -63,7 +55,7 @@ class _ClientProxy:
     def __getattr__(self, name: str) -> Any:
         live_client = get_client()
         if live_client is None:
-            raise RuntimeError("OPENAI_API_KEY not set in environment or Streamlit secrets")
+            raise RuntimeError("OPENAI_API_KEY not set in environment")
         return getattr(live_client, name)
 
 
@@ -159,7 +151,7 @@ def run_raw_insight_pass(
     if not client:
         log.warning(
             "Pass 2 SKIPPED for %s — OpenAI client is None "
-            "(OPENAI_API_KEY not set in env or Streamlit secrets)",
+            "(OPENAI_API_KEY not set in env)",
             source_file,
         )
         return {}
