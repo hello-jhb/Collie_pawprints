@@ -89,7 +89,6 @@
   .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;margin-bottom:16px;font-family:var(--serif)}
   .memo h2{font-family:var(--serif);font-weight:500;font-size:16px;color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
   .memo h2:first-child{margin-top:0}
-  .memo h2:first-child + p{font-size:17px;color:var(--ink)}
   .memo p,.memo li{font-size:15.5px;line-height:1.65}
   .memo ul{margin:6px 0;padding-left:20px}
   .memo strong{font-weight:600}
@@ -218,13 +217,12 @@
       </div>
       <div class="layout">
         <div class="subid" id="subid"></div>
+        <div class="cardlabel">Investment Summary</div>
+        <div class="facts" id="facts"></div>
         <div class="memo" id="memo"></div>
         <details class="detail">
-          <summary>▸ Supporting facts &amp; engine detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
-          <div class="detail-body">
-            <div class="facts" id="facts"></div>
-            <div id="detail"></div>
-          </div>
+          <summary>▸ Engine Detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
+          <div class="detail-body" id="detail"></div>
         </details>
         <div class="ask-cta">
           <button type="button" class="btn-upload" id="askBtn">💬 Ask questions about this investment</button>

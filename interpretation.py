@@ -675,24 +675,15 @@ HARD RULES (a violation makes the read worthless):
 8. Write investment prose, not a metric list. Tight. An analyst's voice, not a dashboard.
 9. Areas for Review are POINTERS to investigate, not prescribed actions — phrase them as
    things worth investigating further, proportional to the issue, never as directives.
-10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance;
-    ground the Overall Assessment and Executive Summary in the strength of the thesis instead.
+10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance.
 11. Respect DATA CONFIDENCE. A component marked T2-unfooted is a single line item, not a
     footed total — hedge it ("based on a single line, not a footed total") rather than stating
     it with the same certainty as a T1 or T2-footed figure.
-12. Assume the reader already knows the deal basics (strategy, hold period, going-in cap rate)
-    from the underwriting itself — do not restate them. Every section should earn its place by
-    answering "why does this matter", not by repeating what's already in the model.
+12. The reader already has the deal facts (acquisition price, IRR, debt, NOI, occupancy) in a
+    separate summary card above this read — do NOT restate them or open with a scored verdict.
+    Go straight to what changed and why it matters; the facts card already did the orienting.
 
-OUTPUT — exactly these four sections, markdown headers:
-## Overall Assessment
-   One line: a short bold verdict (e.g. "**On track.**", "**Needs attention.**", "**Materially
-   off plan.**") followed by one sentence on why. This is the single most important line in the
-   read — a reader who reads nothing else should still know where the deal stands.
-## Executive Summary
-   2–4 sentences on the CURRENT STATE: how the investment is performing overall, whether it is
-   on plan or materially off plan, and the single biggest change since underwriting. Do not
-   restate deal basics the reader already knows — focus on what has happened, not what was planned.
+OUTPUT — exactly these two sections, markdown headers:
 ## Key Findings
    3–5 bullets, each an evidence-backed observation drawn from the Claims — what happened AND
    why it matters, not just a restated number. Lead with the most important.
@@ -715,28 +706,8 @@ def _prompt_payload(fs: dict) -> str:
     return "\n".join(lines)
 
 
-def _overall_assessment(fs: dict) -> str:
-    """A one-line verdict — the single most important thing a reader sees. Derived from
-    the same NOI-variance gate the gap_driver claim uses, so it never disagrees with it."""
-    a = fs["deal"]["archetype"]
-    pf = fs.get("performance")
-    if not pf:                                     # acquisition mode — no actuals to judge
-        return f"**{a['label'].title()} acquisition.** {a.get('lens', '')}"
-    pct = pf.get("noi_variance_pct")
-    if pct is None:
-        return "**Early read.** Not enough elapsed history yet to call a trend."
-    if abs(pct) <= _NOI_VARIANCE_GATE:
-        return f"**On track.** NOI is within {int(_NOI_VARIANCE_GATE*100)}% of plan ({pct*100:+.1f}%)."
-    verdict = "Needs attention" if pct < 0 else "Tracking ahead of plan"
-    return f"**{verdict}.** NOI is {abs(pct)*100:.1f}% {'below' if pct < 0 else 'above'} plan."
-
-
 def _deterministic_read(fs: dict) -> str:
-    a = fs["deal"]["archetype"]
-    out = ["## Overall Assessment", _overall_assessment(fs),
-           "", "## Executive Summary",
-           f"{a['label'].title()} deal ({a['confidence']} confidence). {a.get('lens','')}",
-           "", "## Key Findings"]
+    out = ["## Key Findings"]
     for c in fs.get("claims", []):
         out.append(f"- **{c['headline']}** — {c.get('why','')}"
                    + (f" {c['implication']}" if c.get("implication") else ""))
