@@ -4,77 +4,99 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Collie — Paw Prints</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <style>
   :root{
-    --bg:#f6f7f9; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
+    --bg:#050608; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
     --line:#e6e8ec; --accent:#6d5bff; --accent-bg:#eaf1fb; --good:#17742a; --good-bg:#e7f4ea;
+    --page-fg:#ffffff; --page-muted:rgba(255,255,255,.55);
     --radius:12px; --serif:Georgia,"Times New Roman",serif; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5}
-  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+  body{margin:0;background-color:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;
+    background-image:radial-gradient(900px 580px at 50% -220px, rgba(205,235,255,.08), transparent 62%),
+                     linear-gradient(180deg, #050608 0%, #0A0D10 42%, #101318 100%);
+    background-attachment:fixed;
+  }
+  .wrap{max-width:1320px;margin:0 auto;padding:24px}
+  .topbar{padding:16px 24px 0;display:flex;align-items:center;justify-content:space-between}
+  .topbar .brand{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:21px;letter-spacing:0;color:var(--page-fg)}
+  .topbar .version{font-size:12px;color:var(--page-muted)}
 
   /* card layout */
-  .card-frame{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;min-height:600px}
-  .card-header{display:flex;align-items:center;justify-content:space-between;padding:24px 32px;border-bottom:1px solid var(--line)}
-  .card-title{font-size:14px;font-weight:600;letter-spacing:.05em;color:var(--ink)}
-  .card-tag{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);text-transform:uppercase}
+  .card-frame{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;max-width:640px;margin:98px auto 0}
   .card-content{display:grid;grid-template-columns:1fr;padding:32px;flex:1}
 
   /* paw prints content */
   .paw-prints-section{text-align:left}
   .paw-prints-headline{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 24px}
-  .paw-prints-title{font-family:var(--serif);font-size:28px;font-weight:600;color:var(--ink);margin:0 0 24px;display:none}
-  .paw-prints-desc{font-size:13px;line-height:1.7;color:var(--muted);margin:0 0 32px;max-width:520px}
+  .paw-prints-title{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:28px;font-weight:600;color:var(--ink);margin:0 0 8px}
+  .paw-prints-desc{font-size:15px;line-height:1.4;color:var(--muted);margin:0 0 48px}
 
-  /* upload section */
-  .upload-section{margin:24px 0}
-  .upload-section.highlight{padding:20px;background:rgba(109,91,255,.04);border:1px solid rgba(109,91,255,.15);border-radius:8px;margin:24px 0}
-  .upload-label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
-  .upload-helper{font-size:12px;color:var(--muted);margin:8px 0 0}
+  /* access form */
+  .divider{border:none;border-top:1px solid var(--line);margin:32px 0}
+  .form-grid{display:flex;flex-direction:column;gap:16px;margin:20px 0 24px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field-label{font-size:12px;color:var(--muted);font-weight:600}
+  .field input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .checkbox-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--muted);margin:0 0 10px}
+  .checkbox-row input{margin-top:2px;accent-color:var(--accent)}
 
-  /* drop zone */
-  .drop{border:1.5px dashed #bcc0ca;border-radius:8px;padding:24px;margin:12px 0;cursor:pointer;transition:.15s;background:#f9f9fb;text-align:center}
-  .drop:hover,.drop.over{border-color:var(--accent);background:rgba(109,91,255,.03)}
-  .drop .text{font-size:13px;color:var(--hint)}
-  .drop .text u{text-decoration:underline;cursor:pointer}
+  /* unified app card */
+  .app-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);max-width:1080px;margin:56px auto 0;overflow:hidden}
+
+  /* upload bar — a skinny strip at the top of the app card */
+  .upload-bar{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+  .upload-col{flex:1;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .upload-col:first-child{border-right:1px dashed var(--line)}
+  .upload-col .upload-label{margin:0}
+  .upload-col-action{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .upload-generate{display:flex;align-items:center;padding:14px 20px;border-left:1px solid var(--line)}
+  .upload-status{padding:0 20px}
+  .upload-label{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
+  .upload-bar .upload-label{font-size:11px;margin:0}
+  .btn-upload{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+  .btn-upload:hover:not(:disabled){background:rgba(109,91,255,.05)}
 
   /* buttons */
   button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:9px 18px;cursor:pointer;font-weight:600;transition:.15s;letter-spacing:.02em}
   button:hover:not(:disabled){background:#5835e0}
   button:disabled{opacity:.4;cursor:not-allowed}
 
-  .btn-secondary{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
-  .btn-secondary:hover:not(:disabled){background:rgba(109,91,255,.05)}
-
-  .upload-actions{display:flex;gap:12px;margin-top:20px}
+  .upload-actions{display:flex;justify-content:center;gap:12px;margin-top:60px}
 
   /* progress circle */
-  .progress-container{display:none;margin-top:24px;align-items:center;gap:12px}
+  .progress-container{display:none;margin-top:14px;align-items:center;gap:12px}
   .progress-container.active{display:flex}
   .progress-circle{width:24px;height:24px;border-radius:50%;border:2px solid rgba(109,91,255,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .progress-label{font-size:12px;color:var(--muted);font-weight:500}
 
   .filechip{font-size:12px;background:#f0f2f5;border-radius:6px;padding:4px 8px;display:inline-block;margin:4px 4px 0;font-weight:500}
-  .muted{color:var(--muted)} .hint{color:var(--hint)}
+  .muted{color:var(--muted)} .hint{color:var(--muted)}
 
-  /* deal layout */
-  .layout{display:grid;grid-template-columns:1fr 340px;gap:20px;align-items:start}
-  .col-main{min-width:0}
-  .head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .head .name{font-size:20px;font-weight:600}
+  /* deal layout — sits inside the app card, below the upload bar. Single column:
+     the analysis is the product; chat is a follow-up, reached via the drawer. */
+  #dealView{opacity:0;transition:opacity .25s ease}
+  #dealView.show{opacity:1}
+  .layout{padding:20px;background:#fafafb;max-width:720px;margin:0 auto}
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;padding:16px 20px 0}
+  .head .name{font-size:16px;font-weight:600;color:var(--ink)}
+  .badge{color:var(--ink)}
   .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;margin-bottom:16px;font-family:var(--serif)}
   .memo h2{font-family:var(--serif);font-weight:500;font-size:16px;color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
   .memo h2:first-child{margin-top:0}
+  .memo h2:first-child + p{font-size:17px;color:var(--ink)}
   .memo p,.memo li{font-size:15.5px;line-height:1.65}
   .memo ul{margin:6px 0;padding-left:20px}
   .memo strong{font-weight:600}
 
   .cardlabel{font-family:var(--serif);font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px 2px}
   .subid{color:var(--muted);font-size:13.5px;margin:-6px 0 14px 2px}
-  .subid .na{color:var(--hint)}
+  .subid .na{color:var(--muted)}
   .facts{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px;margin-bottom:14px}
   .facts h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--hint);font-weight:600;margin:18px 0 6px}
   .facts h3:first-child{margin-top:0}
@@ -90,8 +112,16 @@
   .detail-body{font-size:14px;margin-top:10px}
   .detail-body h4{margin:14px 0 4px;font-size:14px} .detail-body ul{padding-left:18px;margin:4px 0}
 
-  /* chat rail */
-  .chat{position:sticky;top:20px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;height:calc(100vh - 110px);min-height:420px}
+  .ask-cta{display:flex;justify-content:center;margin-top:20px}
+
+  /* chat — a follow-up drawer, not a permanent rail */
+  .chat-drawer{position:fixed;inset:0;z-index:100;pointer-events:none}
+  .chat-drawer .chat-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.35);opacity:0;transition:opacity .2s ease}
+  .chat-drawer.open{pointer-events:auto}
+  .chat-drawer.open .chat-backdrop{opacity:1}
+  .chat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:420px}
+  .chat-drawer .chat{position:absolute;top:0;right:0;height:100%;width:400px;max-width:90vw;border-radius:0;border-width:0 0 0 1px;transform:translateX(100%);transition:transform .25s ease}
+  .chat-drawer.open .chat{transform:translateX(0)}
   .chat .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted)}
   .chat .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
   .bub{max-width:88%;font-size:13.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
@@ -100,80 +130,116 @@
   .chat .in{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
   .chat .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
   .chat .in button{padding:8px 12px}
-  @media(max-width:900px){.layout{grid-template-columns:1fr}.chat{height:auto;position:static}}
 </style>
 </head>
 <body>
 <div class="topbar">
-  <div class="brand">Collie<span>.</span></div>
-  <div id="topright" class="hint" style="font-size:13px">grounded investment reads</div>
+  <div class="brand">Collie</div>
+  <div class="version">Release v.1.0</div>
 </div>
 
 <div class="wrap">
-  <div id="uploadView" class="card-frame">
-    <div class="card-header">
-      <div class="card-title">Paw Prints v 1.0</div>
-    </div>
+  <div id="accessView" class="card-frame">
     <div class="card-content">
       <div class="paw-prints-section">
-        <p class="paw-prints-headline">Read the story behind a real estate investment.</p>
-        <h1 class="paw-prints-title">Paw Prints</h1>
-        <p class="paw-prints-desc">Paw Prints reads an underwriting model the way an investment professional would — extracting the assumptions, understanding the investment thesis, and establishing the financial baseline. Add operating statements to compare actual performance against the original plan and quickly identify where the story has changed.</p>
+        <h1 class="paw-prints-title">Deal Analyzer</h1>
+        <p class="paw-prints-headline">A prototype by Collie</p>
+        <p class="paw-prints-desc">Deal Analyzer reconstructs the original investment thesis from an acquisition underwriting model and compares it with actual operating performance. It is designed to help real estate investment professionals quickly understand an investment, identify what has changed since acquisition, and establish context for further analysis.</p>
 
-        <div class="upload-section highlight">
-          <div class="upload-label">Upload an underwriting model</div>
-          <div id="drop" class="drop">
-            <div class="text">Drop an Excel file here, or <u>browse</u></div>
-            <div id="files" style="margin-top:6px"></div>
-          </div>
-          <div class="upload-helper">Build the investment baseline from the original deal model.</div>
-          <input id="model" type="file" accept=".xlsx,.xls" hidden />
+        <hr class="divider" />
+
+        <div class="upload-label">Early Access</div>
+        <p class="paw-prints-desc" style="margin-bottom:24px">This prototype is being released to a limited group of professionals for evaluation and feedback.</p>
+
+        <div class="form-grid">
+          <label class="field">
+            <span class="field-label">Name</span>
+            <input type="text" id="accName" />
+          </label>
+          <label class="field">
+            <span class="field-label">Work Email</span>
+            <input type="email" id="accEmail" />
+          </label>
+          <label class="field">
+            <span class="field-label">Company</span>
+            <input type="text" id="accCompany" />
+          </label>
         </div>
 
-        <div class="upload-section">
-          <button class="btn-secondary" id="addActuals">+ Add operating statements</button>
-          <div class="upload-helper">Compare actual performance against the original plan.</div>
-          <div id="actualsChips" style="margin-top:8px"></div>
-          <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
-        </div>
+        <label class="checkbox-row"><input type="checkbox" id="ackPrototype" /><span>I understand this is an early prototype.</span></label>
+        <label class="checkbox-row"><input type="checkbox" id="ackPermission" /><span>I confirm I have permission to upload these documents.</span></label>
 
         <div class="upload-actions">
-          <button id="go" disabled>Analyze</button>
+          <button id="continueBtn" disabled>Continue</button>
         </div>
-        <div id="progressContainer" class="progress-container">
-          <div class="progress-circle"></div>
-          <div class="progress-label" id="progressLabel">Reading model…</div>
-        </div>
-        <div id="uErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
+        <div id="accErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
       </div>
     </div>
   </div>
 
-  <div id="dealView" style="display:none">
-    <div class="head">
-      <span class="name" id="dName"></span>
-      <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
-      <span class="badge" id="aBadge"></span>
-      <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
-      <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
+  <div id="appView" style="display:none">
+   <div class="app-card">
+    <div id="uploadBar" class="upload-bar">
+      <div class="upload-col">
+        <div class="upload-label">1. Upload underwriting model</div>
+        <div class="upload-col-action">
+          <button type="button" class="btn-upload" id="modelBtn">Choose a file</button>
+          <div id="files"></div>
+        </div>
+        <input id="model" type="file" accept=".xlsx,.xls" hidden />
+      </div>
+      <div class="upload-col">
+        <div class="upload-label">2. (Optional) Upload operating statements</div>
+        <div class="upload-col-action">
+          <button type="button" class="btn-upload" id="actualsBtn">Choose files</button>
+          <div id="actualsChips"></div>
+        </div>
+        <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
+      </div>
+      <div class="upload-generate">
+        <button id="go" disabled>Generate</button>
+      </div>
     </div>
-    <div class="layout">
-      <div class="col-main">
+    <div class="upload-status">
+      <div id="progressContainer" class="progress-container">
+        <div class="progress-circle"></div>
+        <div class="progress-label" id="progressLabel">Reading model…</div>
+      </div>
+      <div id="uErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
+    </div>
+
+    <div id="dealView" style="display:none">
+      <div class="head">
+        <span class="name" id="dName"></span>
+        <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
+        <span class="badge" id="aBadge"></span>
+        <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
+        <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
+      </div>
+      <div class="layout">
         <div class="subid" id="subid"></div>
-        <div class="cardlabel">Investment Summary</div>
-        <div class="facts" id="facts"></div>
-        <div class="cardlabel">Investment Snapshot</div>
         <div class="memo" id="memo"></div>
         <details class="detail">
-          <summary>▸ Engine Detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
-          <div class="detail-body" id="detail"></div>
+          <summary>▸ Supporting facts &amp; engine detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
+          <div class="detail-body">
+            <div class="facts" id="facts"></div>
+            <div id="detail"></div>
+          </div>
         </details>
+        <div class="ask-cta">
+          <button type="button" class="btn-upload" id="askBtn">💬 Ask questions about this investment</button>
+        </div>
       </div>
-      <div class="chat">
-        <div class="ch">Ask about this deal</div>
-        <div class="msgs" id="msgs"><div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div></div>
-        <div class="in"><input id="q" placeholder="Ask a question" /><button id="send">Send</button></div>
-      </div>
+    </div>
+   </div>
+  </div>
+
+  <div id="chatDrawer" class="chat-drawer">
+    <div class="chat-backdrop" id="chatBackdrop"></div>
+    <div class="chat">
+      <div class="ch">Ask about this deal <button type="button" class="ghost" id="closeChat" style="float:right;font-size:11px;padding:3px 8px">✕</button></div>
+      <div class="msgs" id="msgs"><div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div></div>
+      <div class="in"><input id="q" placeholder="Ask a question" /><button id="send">Send</button></div>
     </div>
   </div>
 </div>
@@ -188,11 +254,25 @@ const isNA=v=>v==='—'||(typeof v==='string'&&v.includes('na">'));
 const kv=(lab,val)=>`<span class="kv"><span class="k">${lab}</span> <span class="v${isNA(val)?' na':''}">${val}</span></span>`;
 const inline=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}</div>`;
 
+// access form wiring
+const accFields=['accName','accEmail','accCompany'];
+const ackFields=['ackPrototype','ackPermission'];
+[...accFields,...ackFields].forEach(id=>$(id).addEventListener('input',validateAccess));
+ackFields.forEach(id=>$(id).addEventListener('change',validateAccess));
+function validateAccess(){
+  const fieldsOk=accFields.every(id=>$(id).value.trim());
+  const ackOk=ackFields.every(id=>$(id).checked);
+  $('continueBtn').disabled=!(fieldsOk&&ackOk);
+}
+$('continueBtn').onclick=()=>{
+  $('accessView').style.display='none';
+  $('appView').style.display='block';
+};
+
 // upload wiring
 const model=$('model'), actuals=$('actuals');
-$('drop').onclick=()=>model.click();
-$('addActuals').onclick=e=>{e.stopPropagation();actuals.click();};
-['dragover','dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.toggle('over',ev==='dragover');if(ev==='drop'){model.files=e.dataTransfer.files;refreshFiles();}}));
+$('modelBtn').onclick=()=>model.click();
+$('actualsBtn').onclick=()=>actuals.click();
 model.onchange=actuals.onchange=refreshFiles;
 function refreshFiles(){
   let modelChip='';
@@ -226,7 +306,7 @@ async function analyze(){
     renderDeal(await r.json());
   }catch(e){
     progressContainer.classList.remove('active');
-    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Analyze';
+    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Generate';
   }
 }
 
@@ -246,7 +326,10 @@ function rateText(s){
 function renderDeal(d){
   SID=d.session_id; FS=d.fact_sheet;
   const fname=(model.files[0]?.name||'Deal').replace(/\.(xlsx|xls)$/i,'');
-  $('uploadView').style.display='none'; $('dealView').style.display='block';
+  $('progressContainer').classList.remove('active');
+  $('go').disabled=false; $('go').textContent='Generate';
+  $('dealView').style.display='block';
+  requestAnimationFrame(()=>$('dealView').classList.add('show'));
   const prop=FS.deal.property||{};
   const nm=idVal(prop.name);
   $('dName').textContent = nm ? nm.value : fname;
@@ -303,7 +386,10 @@ function renderDetail(d, fs){
   $('detail').innerHTML = extras + marked.parse(d.detail_md||'_No detail available._');
 }
 
-// chat
+// chat drawer
+$('askBtn').onclick=()=>$('chatDrawer').classList.add('open');
+$('closeChat').onclick=()=>$('chatDrawer').classList.remove('open');
+$('chatBackdrop').onclick=()=>$('chatDrawer').classList.remove('open');
 $('send').onclick=sendChat; $('q').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
 async function sendChat(){
   const q=$('q').value.trim(); if(!q||!SID)return;

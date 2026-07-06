@@ -145,6 +145,24 @@ def _k(v):
     return f"${abs(v)/1e3:,.0f}K" if abs(v) < 1e6 else f"${abs(v)/1e6:.1f}M"
 
 
+def _period_phrase(months: list[str] | None) -> str:
+    """" in March 2021" / " in May and June 2021" from ["2021-03"] / ["2021-05","2021-06"].
+    Empty string if there's no crisp month concentration to cite."""
+    if not months:
+        return ""
+    import calendar
+    names, years = [], set()
+    for ym in months:
+        y, m = ym.split("-")
+        years.add(y)
+        names.append(calendar.month_name[int(m)])
+    joined = (names[0] if len(names) == 1
+              else f"{names[0]} and {names[1]}" if len(names) == 2
+              else ", ".join(names[:-1]) + f", and {names[-1]}")
+    year = f" {sorted(years)[0]}" if len(years) == 1 else ""
+    return f" in {joined}{year}"
+
+
 def _performance_claims(fs: dict, perf: dict) -> list[dict]:
     var = perf.get("variance") or {}
     items = perf.get("items") or {}
@@ -193,21 +211,34 @@ def _performance_claims(fs: dict, perf: dict) -> list[dict]:
 
     # operational_flags — plan-vs-actual line items that signal RECURRING operating
     # risk (user rules): bad debt trend, one-time/unbudgeted R&M, insurance proceeds
-    # (which foreshadow a higher renewal premium).
+    # (which foreshadow a higher renewal premium). Orphans (no line on one side) are
+    # folded in even when their dollar size falls outside the top-6 movers — an
+    # unbudgeted category is worth flagging regardless of how it ranks by size.
     flags: list[str] = []
-    for it in (items.get("movers") or []):
+    flagged: dict[str, dict] = {r["concept"]: r for r in (items.get("movers") or [])}
+    for r in (items.get("orphans") or []):
+        flagged.setdefault(r["concept"], r)
+    for it in flagged.values():
         lab = (it.get("label") or "").lower()
         d = it.get("delta") or 0
+        when = _period_phrase(it.get("actual_months"))
+        unbudgeted = it.get("status") == "actual_only"
+        tag = " — not found in the underwriting's OPEX budget" if unbudgeted else ""
         if ("bad debt" in lab or "credit loss" in lab) and d > 0:
-            flags.append(f"Bad debt is +{_k(d)} over plan — read as a collections/credit trend, "
-                         "not a one-off; watch tenant health.")
+            flags.append(f"Bad debt is +{_k(d)} over plan{when}{tag} — read as a "
+                         "collections/credit trend, not a one-off; watch tenant health.")
         elif (("r&m" in lab or "repair" in lab or "maintenance" in lab) and d > 0):
-            flags.append(f"R&M is +{_k(d)} over plan — check whether it's a one-time unbudgeted "
-                         "repair or a rising run-rate.")
+            flags.append(f"R&M is +{_k(d)} over plan{when}{tag} — check whether it's a "
+                         "one-time unbudgeted repair or a rising run-rate.")
         elif "insurance" in lab and d < 0:
             flags.append("Insurance proceeds booked — flag a likely higher insurance premium at renewal.")
         elif "insurance" in lab and d > 0:
-            flags.append(f"Insurance is +{_k(d)} over plan — premium pressure likely to persist.")
+            flags.append(f"Insurance is +{_k(d)} over plan{when}{tag} — premium pressure likely to persist.")
+        elif ("marketing" in lab or "leasing" in lab) and d > 0:
+            flags.append(f"Marketing & leasing spend is +{_k(d)} over plan{when}{tag}.")
+        elif unbudgeted and abs(d) > 1:
+            flags.append(f"{it.get('label')} of {_k(it.get('actual') or 0)}{when} was not "
+                         "found in the underwriting's OPEX budget, but appears in the actuals.")
     if flags:
         claims.append({
             "id": "operational_flags", "direction": "expense", "confidence": conf,
@@ -642,22 +673,32 @@ HARD RULES (a violation makes the read worthless):
    reposition execution for value-add; delivery/absorption for development). For performance mode, be
    SPECIFIC: surface operating flags (bad debt, unbudgeted R&M, insurance) as recurring risk.
 8. Write investment prose, not a metric list. Tight. An analyst's voice, not a dashboard.
-9. Recommendations are JUDGMENT — phrase them as such, proportional to the issue.
-10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance.
+9. Areas for Review are POINTERS to investigate, not prescribed actions — phrase them as
+   things worth investigating further, proportional to the issue, never as directives.
+10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance;
+    ground the Overall Assessment and Executive Summary in the strength of the thesis instead.
 11. Respect DATA CONFIDENCE. A component marked T2-unfooted is a single line item, not a
     footed total — hedge it ("based on a single line, not a footed total") rather than stating
     it with the same certainty as a T1 or T2-footed figure.
+12. Assume the reader already knows the deal basics (strategy, hold period, going-in cap rate)
+    from the underwriting itself — do not restate them. Every section should earn its place by
+    answering "why does this matter", not by repeating what's already in the model.
 
-OUTPUT — exactly these three sections, markdown headers:
-## Investment Snapshot
-   One short paragraph: the deal (property, archetype), where it sits in the business plan, and the
-   NOI/occupancy arc.
-## Key Investment Findings
-   3–5 bullets, each an evidence-backed observation drawn from the Claims (what changed / why it
-   matters). Lead with the most important. End with the "Where to look" pointer if present.
-## Attention & Recommendations
-   1–2 issues that most affect future performance or risk (coverage-framed, not rate-alarmist), then
-   1–2 practical next steps.
+OUTPUT — exactly these four sections, markdown headers:
+## Overall Assessment
+   One line: a short bold verdict (e.g. "**On track.**", "**Needs attention.**", "**Materially
+   off plan.**") followed by one sentence on why. This is the single most important line in the
+   read — a reader who reads nothing else should still know where the deal stands.
+## Executive Summary
+   2–4 sentences on the CURRENT STATE: how the investment is performing overall, whether it is
+   on plan or materially off plan, and the single biggest change since underwriting. Do not
+   restate deal basics the reader already knows — focus on what has happened, not what was planned.
+## Key Findings
+   3–5 bullets, each an evidence-backed observation drawn from the Claims — what happened AND
+   why it matters, not just a restated number. Lead with the most important.
+## Areas for Review
+   1–2 items that most affect future performance or risk (coverage-framed, not rate-alarmist),
+   framed as pointers to investigate further — not as recommended actions.
 """
 
 
@@ -674,15 +715,32 @@ def _prompt_payload(fs: dict) -> str:
     return "\n".join(lines)
 
 
+def _overall_assessment(fs: dict) -> str:
+    """A one-line verdict — the single most important thing a reader sees. Derived from
+    the same NOI-variance gate the gap_driver claim uses, so it never disagrees with it."""
+    a = fs["deal"]["archetype"]
+    pf = fs.get("performance")
+    if not pf:                                     # acquisition mode — no actuals to judge
+        return f"**{a['label'].title()} acquisition.** {a.get('lens', '')}"
+    pct = pf.get("noi_variance_pct")
+    if pct is None:
+        return "**Early read.** Not enough elapsed history yet to call a trend."
+    if abs(pct) <= _NOI_VARIANCE_GATE:
+        return f"**On track.** NOI is within {int(_NOI_VARIANCE_GATE*100)}% of plan ({pct*100:+.1f}%)."
+    verdict = "Needs attention" if pct < 0 else "Tracking ahead of plan"
+    return f"**{verdict}.** NOI is {abs(pct)*100:.1f}% {'below' if pct < 0 else 'above'} plan."
+
+
 def _deterministic_read(fs: dict) -> str:
     a = fs["deal"]["archetype"]
-    out = ["## Investment Snapshot",
+    out = ["## Overall Assessment", _overall_assessment(fs),
+           "", "## Executive Summary",
            f"{a['label'].title()} deal ({a['confidence']} confidence). {a.get('lens','')}",
-           "", "## Key Investment Findings"]
+           "", "## Key Findings"]
     for c in fs.get("claims", []):
         out.append(f"- **{c['headline']}** — {c.get('why','')}"
                    + (f" {c['implication']}" if c.get("implication") else ""))
-    out += ["", "## Attention & Recommendations",
+    out += ["", "## Areas for Review",
             "_(Narrative read requires an API key; showing the computed findings above.)_"]
     return "\n".join(out)
 

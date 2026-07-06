@@ -234,6 +234,29 @@ def compute_returns(spine, model_noi: dict, actual_noi: dict, overlap: set,
     return out
 
 
+def _concentrated_months(by_month: dict[str, float], top_n: int = 3,
+                          share_threshold: float = 0.75) -> list[str] | None:
+    """Which few months actually drove this category's total — WHERE the variance
+    happened, not just how big it is. Returns the fewest chronological months whose
+    combined magnitude clears share_threshold of the total; None if the activity is
+    spread across too many months to call out crisply (e.g. a flat monthly run-rate),
+    so we never claim false concentration on routine recurring costs."""
+    nonzero = {m: v for m, v in by_month.items() if abs(v) > 1}
+    total = sum(abs(v) for v in nonzero.values())
+    if not nonzero or total <= 0:
+        return None
+    ranked = sorted(nonzero.items(), key=lambda kv: -abs(kv[1]))
+    picked, running = [], 0.0
+    for m, v in ranked:
+        picked.append(m)
+        running += abs(v)
+        if running / total >= share_threshold:
+            break
+    if len(picked) > top_n:
+        return None
+    return sorted(picked)
+
+
 def build_variance_items(ru: dict, a: dict, overlap: set, scale: float) -> dict[str, Any]:
     """Decompose the NOI variance into line-item drivers ("what moved"). Actual opex
     is summed from the LEAF inventory by concept (no hierarchy double-count); plan
@@ -248,15 +271,20 @@ def build_variance_items(ru: dict, a: dict, overlap: set, scale: float) -> dict[
 
     # Actual opex by category — summed from LEAVES over the overlap (positive). The
     # full leaf total feeds the bridge; only named categories ('other' excluded)
-    # feed the movers.
+    # feed the movers. A per-month breakdown is kept alongside so a category can be
+    # attributed to the specific month(s) it actually occurred in.
     actual_cat: dict[str, float] = defaultdict(float)
+    actual_by_period: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     actual_opex_total = 0.0
     for leaf in a.get("expense_leaves", []):
-        s = sum(v for m, v in leaf["series"].items() if m in overlap)
+        leaf_months = {m: v for m, v in leaf["series"].items() if m in overlap}
+        s = sum(leaf_months.values())
         actual_opex_total += s
         con = leaf.get("concept")
         if con and con != "other":
             actual_cat[con] += s
+            for m, v in leaf_months.items():
+                actual_by_period[con][m] += v
 
     # Plan opex by category — from the sheet RICHEST in opex detail (so SOFR-curve /
     # lease-roll lines on other sheets can't masquerade as expenses). Model opex is
@@ -268,14 +296,18 @@ def build_variance_items(ru: dict, a: dict, overlap: set, scale: float) -> dict[
             by_sheet[it["sheet"]].add(con)
     opex_sheet = max(by_sheet, key=lambda s: len(by_sheet[s])) if by_sheet else None
     plan_cat: dict[str, float] = defaultdict(float)
+    plan_by_period: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for it in ru.get("line_items", []):
         if it["sheet"] != opex_sheet:
             continue
         con = opex_concept(it["label"])
         if not con or con == "other":
             continue
-        s = sum(v for d, v in (it.get("by_period") or []) if d[:7] in overlap)
+        period_vals = {d[:7]: v for d, v in (it.get("by_period") or []) if d[:7] in overlap}
+        s = sum(period_vals.values())
         plan_cat[con] += abs(s) * inv
+        for m, v in period_vals.items():
+            plan_by_period[con][m] += abs(v) * inv
 
     # The opex-detail sheet can be on a different basis than the operating opex
     # (gross/recoverable vs net), so anchor the category MIX to the operating opex
@@ -286,14 +318,18 @@ def build_variance_items(ru: dict, a: dict, overlap: set, scale: float) -> dict[
     if plan_named > 0 and plan_opex_total > 0:
         f = plan_opex_total / plan_named
         plan_cat = {c: v * f for c, v in plan_cat.items()}
+        plan_by_period = {c: {m: v * f for m, v in mm.items()} for c, mm in plan_by_period.items()}
 
     rows = []
     for con in set(actual_cat) | set(plan_cat):
         p, ac = plan_cat.get(con, 0.0), abs(actual_cat.get(con, 0.0))
         status = ("matched" if con in plan_cat and con in actual_cat
                   else "plan_only" if con in plan_cat else "actual_only")
-        rows.append({"concept": con, "label": _CONCEPT_LABEL.get(con, con.title()),
-                     "plan": p, "actual": ac, "delta": ac - p, "status": status})
+        row = {"concept": con, "label": _CONCEPT_LABEL.get(con, con.title()),
+               "plan": p, "actual": ac, "delta": ac - p, "status": status,
+               "actual_months": _concentrated_months(actual_by_period.get(con, {})),
+               "plan_months": _concentrated_months(plan_by_period.get(con, {}))}
+        rows.append(row)
     rows.sort(key=lambda r: -abs(r["delta"]))
 
     # Bridge uses the TOTALS (so it foots): revenue Δ − opex Δ ≈ NOI Δ.
