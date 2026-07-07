@@ -44,6 +44,7 @@ from typing import Any
 from workbook_map import build_workbook_map, _passes_domain, _concept_of
 from financial_model_parser import parse_workbook_tables_cached
 from cashflow_spine import find_spine, _load_grids
+from concept_fallback import find_concept
 
 log = logging.getLogger("fb.dealtruth")
 if not log.handlers:
@@ -523,6 +524,26 @@ def _infer_deal_type(oracle: dict, ops: dict) -> str:
 
 _NON_NEGOTIABLE = ("purchase_price", "total_cost", "exit_value", "exit_cap",
                    "noi", "levered_irr")
+
+# Concepts eligible for the GPT gap-fill read (concept_fallback.find_concept)
+# when the deterministic pipeline exhausts every source and still comes up
+# empty. Deliberately limited to static, single-cell "labeled assumption"
+# concepts:
+#   - noi/revenue/opex/capex/debt_service are excluded: they're operating-
+#     trajectory concepts (period-sensitive, prone to component-vs-total
+#     confusion) with their own multi-tier deterministic derivation
+#     (operating_trajectory) that a flat single-cell GPT read can't safely
+#     replace.
+#   - levered_irr/unlevered_irr/equity_multiple/unlevered_equity_multiple are
+#     excluded: they're cash-flow-oracle-validated returns; an unvalidated
+#     GPT-read IRR is a materially weaker fact than what this slot normally
+#     holds, and the existing returns_unvalidated guardrail already covers
+#     the case where the oracle can't validate them.
+#   - going_in_cap is excluded: normally derived from NOI/total_cost, not a
+#     raw labeled-cell read.
+_GAP_FILL_CONCEPTS = ("purchase_price", "total_cost", "debt", "equity", "ltc",
+                      "ltv", "exit_cap", "exit_value", "interest_rate",
+                      "debt_yield", "dscr")
 
 
 def _build_guardrails(canonical: dict, oracle: dict, identities: list[dict],
@@ -1147,6 +1168,20 @@ def build_deal_truth(file_path: str | Path) -> dict[str, Any]:
         idr = next((i for i in identities if i["name"] == ident_name), None)
         if idr and idr.get("passed") and concept in canonical:
             canonical[concept]["cf_validated"] = True
+
+    # GPT gap-fill: for static/labeled-assumption concepts the deterministic
+    # pipeline never found anywhere in the workbook, ask GPT to scan the
+    # top-priority sheets directly before conceding the concept is missing.
+    # No-op (and free) when no OPENAI_API_KEY is configured.
+    for c in _GAP_FILL_CONCEPTS:
+        if c in canonical:
+            continue
+        found = find_concept(c, file_path, m)
+        if found and _passes_domain(c, found["value"]):
+            canonical[c] = found
+        elif found:
+            log.info("gap-fill for %s rejected by domain gate: %r", c, found["value"])
+
     guardrails = _build_guardrails(canonical, oracle, identities, ops, deal_type, m)
     brief_facts = deal_brief_facts(canonical, oracle, hold, ops)
 
@@ -1174,6 +1209,19 @@ def build_deal_truth(file_path: str | Path) -> dict[str, Any]:
                         + ", ".join(mism) + ". Use the engine value; the summary "
                         "is stale/mislabeled for these."),
             "evidence": [r for r in summary_check if not r["match"]]})
+
+    # Flag any concept the deterministic pipeline missed and GPT gap-fill
+    # recovered — it's a self-reported single-cell read, not deterministically
+    # parsed or cash-flow validated, and must be presented that way.
+    for c, info in canonical.items():
+        if info.get("method") == "gpt_fallback":
+            guardrails.append({
+                "code": "gpt_gap_fill",
+                "message": (f"{c} = {info['value']} was found by a GPT read of "
+                            f"{info['source']}, not the deterministic parser or "
+                            f"cash-flow engine — present it as self-reported/"
+                            f"unverified, not validated."),
+                "evidence": {"concept": c, "source": info["source"]}})
 
     result = {
         "version": DEAL_TRUTH_VERSION,

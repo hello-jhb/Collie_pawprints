@@ -6,26 +6,29 @@
 <title>Collie — Paw Prints</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <style>
   :root{
     --bg:#ffffff; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
     --line:#e6e8ec; --accent:#305cde; --accent-bg:#eaf0fe; --good:#17742a; --good-bg:#e7f4ea;
-    --radius:12px; --serif:Georgia,"Times New Roman",serif; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --radius:0; --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     --mono:"JetBrains Mono",ui-monospace,monospace;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
 
-  /* header — mirrors the marketing site's header: same padding, logo position, thickness */
+  /* header — mirrors the marketing site's header exactly: same padding, logo position,
+     thickness, and line-height (the marketing site's body line-height is 1.6, which its
+     .brand inherits since it sets no line-height of its own — matched here explicitly so
+     the brand box height, and its centered position in the header, is pixel-identical) */
   .site-header{padding:34px 52px;display:flex;align-items:center;justify-content:space-between}
-  .site-header .brand{font-family:var(--mono);font-weight:500;font-size:23px;letter-spacing:0;color:var(--ink)}
+  .site-header .brand{font-family:var(--mono);font-weight:500;font-size:23px;line-height:1.6;letter-spacing:0;color:var(--ink)}
   .site-header .version{font-size:12px;color:var(--muted)}
 
   main.page{padding-top:90px;padding-bottom:100px}
 
-  .container{max-width:1280px;margin:0 auto;padding-left:clamp(40px,9.375vw,120px);padding-right:clamp(40px,9.375vw,120px)}
+  .container{max-width:1340px;margin:0 auto;padding-left:clamp(20px,4.6875vw,60px);padding-right:clamp(20px,4.6875vw,60px)}
 
   .page-title{font-family:var(--mono);font-size:28px;font-weight:600;color:var(--ink);margin:0 0 32px}
 
@@ -38,16 +41,16 @@
   /* access form */
   .divider{border:none;border-top:1px solid var(--line);margin:32px 0}
   .form-grid{display:flex;flex-direction:column;gap:16px;margin:20px 0 24px}
-  .field{display:flex;flex-direction:column;gap:6px}
+  .field{display:flex;flex-direction:column;gap:2px}
   .field-label{font-size:12px;color:var(--muted);font-weight:600}
-  .field input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .field input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:0;padding:10px 12px}
   .checkbox-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--muted);margin:0 0 10px}
   .checkbox-row input{margin-top:2px;accent-color:var(--accent)}
   .upload-actions{display:flex;justify-content:flex-start;gap:12px;margin-top:36px}
   .upload-label{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
 
   /* buttons */
-  button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:9px 18px;cursor:pointer;font-weight:600;transition:.15s;letter-spacing:.02em}
+  button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:0;padding:9px 18px;cursor:pointer;font-weight:600;transition:.15s;letter-spacing:.02em}
   button:hover:not(:disabled){background:#2549b8}
   button:disabled{opacity:.4;cursor:not-allowed}
   .btn-upload{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
@@ -55,7 +58,13 @@
   .ghost{background:#fff;color:var(--muted);border:1px solid var(--line)}
   .ghost:hover:not(:disabled){background:#f5f6f8}
 
-  .filechip{font-size:12px;background:#f0f2f5;border-radius:6px;padding:4px 8px;display:inline-block;margin:4px 4px 0;font-weight:500}
+  /* Continue — outline, no fill; reverses to a solid fill on hover/focus/active */
+  #continueBtn{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+  #continueBtn:hover:not(:disabled),
+  #continueBtn:focus:not(:disabled),
+  #continueBtn:active:not(:disabled){background:var(--accent);color:#fff}
+
+  .filechip{font-size:12px;background:#f0f2f5;border-radius:0;padding:4px 8px;display:inline-block;margin:4px 4px 0;font-weight:500}
   .muted{color:var(--muted)} .hint{color:var(--muted)}
   .err{color:#a32d2d;font-size:12px;margin-top:14px}
 
@@ -65,19 +74,20 @@
   .deal-shell{display:flex;align-items:flex-start;gap:32px}
 
   .pane-upload{flex:0 0 clamp(200px,18.75vw,240px);display:flex;flex-direction:column;gap:14px}
-  .upload-box{border:1px dashed var(--line);border-radius:10px;padding:14px}
-  .upload-box .upload-label{margin:0 0 8px;font-size:11px}
+  .upload-box{border:1px dashed var(--line);border-radius:0;padding:10px}
+  .upload-box .upload-label{margin:0 0 6px;font-size:11px}
   .upload-box .optional{color:var(--hint);font-weight:400;text-transform:none;letter-spacing:0}
-  .pane-upload button{font-size:12px;padding:8px 14px}
+  .upload-box button{font-size:12px;padding:5px 10px}
   .pane-upload .filechip{font-size:11px}
   .run-btn{width:100%;padding:10px 14px}
+  .reset-row{display:flex;justify-content:flex-end}
   .progress-container{display:none;margin-top:4px;align-items:center;gap:10px}
   .progress-container.active{display:flex}
   .progress-circle{width:18px;height:18px;flex:none;border-radius:50%;border:2px solid var(--accent-bg);border-top-color:var(--accent);animation:spin .8s linear infinite}
   @keyframes spin{to{transform:rotate(360deg)}}
   .progress-label{font-size:11px;color:var(--muted);font-weight:500}
 
-  .pane-analysis{flex:1 1 420px;min-width:360px;max-width:550px}
+  .pane-analysis{flex:1 1 420px;min-width:360px}
   .analysis-placeholder{min-height:420px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;border:1px dashed var(--line);border-radius:var(--radius);color:var(--hint)}
   .analysis-placeholder svg{color:var(--hint)}
   .analysis-placeholder p{margin:0;font-size:15px;color:var(--muted);font-weight:500}
@@ -93,20 +103,21 @@
   .head .name{font-size:16px;font-weight:600;color:var(--ink)}
   .badge{color:var(--ink)}
   .badge.good{color:var(--good)}
-  .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;font-family:var(--serif)}
-  .memo h2{font-family:var(--serif);font-weight:500;font-size:16px;color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
+  .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;font-family:var(--sans)}
+  .memo h2{font-family:var(--sans);font-weight:600;font-size:clamp(14px,1.25vw,16px);color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
   .memo h2:first-child{margin-top:0}
-  .memo p,.memo li{font-size:15.5px;line-height:1.65}
+  .memo p,.memo li{font-size:clamp(12.5px,1.09375vw,14px);line-height:1.65}
   .memo ul{margin:6px 0;padding-left:20px}
   .memo strong{font-weight:600}
 
-  .cardlabel{font-family:var(--serif);font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px 2px}
-  .subid{color:var(--muted);font-size:13.5px;margin:-6px 0 0 2px}
+  .cardlabel{font-family:var(--sans);font-weight:600;font-size:clamp(14px,1.25vw,16px);color:var(--muted);text-transform:none;letter-spacing:0;margin:0 0 12px}
+  .facts .cardlabel + h3{margin-top:0}
+  .subid{color:var(--muted);font-size:clamp(12.5px,1.055vw,13.5px);margin:-6px 0 0 2px}
   .subid .na{color:var(--muted)}
   .facts{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px}
-  .facts h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--hint);font-weight:600;margin:18px 0 6px}
+  .facts h3{font-size:clamp(10px,0.859vw,11px);letter-spacing:.06em;text-transform:uppercase;color:var(--hint);font-weight:600;margin:18px 0 6px}
   .facts h3:first-child{margin-top:0}
-  .facts .inline{font-size:14.5px;line-height:1.7;margin:0 0 4px;color:var(--ink)}
+  .facts .inline{font-size:clamp(13px,1.133vw,14.5px);line-height:1.7;margin:0 0 4px;color:var(--ink)}
   .facts .inline .k{color:var(--muted)}
   .facts .inline .v{font-weight:600}
   .facts .inline .v.na{color:var(--hint);font-weight:500}
@@ -122,11 +133,11 @@
   .chat-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:420px}
   .chat-panel .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
   .chat-panel .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-  .bub{max-width:92%;font-size:13.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
+  .bub{max-width:92%;font-size:13.5px;padding:8px 11px;border-radius:0;line-height:1.5}
   .bub.u{align-self:flex-end;background:var(--accent-bg);color:var(--accent)}
   .bub.a{align-self:flex-start;background:#f3f4f6}
   .chat-panel .in{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
-  .chat-panel .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .chat-panel .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:0;padding:8px 10px}
   .chat-panel .in button{padding:8px 12px}
 
   #dealView{opacity:0;transition:opacity .25s ease}
@@ -197,6 +208,9 @@
           <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
         </div>
         <button id="go" class="run-btn" disabled>Run Analysis</button>
+        <div class="reset-row">
+          <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">Reset</button>
+        </div>
         <div id="progressContainer" class="progress-container">
           <div class="progress-circle"></div>
           <div class="progress-label" id="progressLabel">Reading model…</div>
@@ -222,10 +236,8 @@
               <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
               <span class="badge" id="aBadge"></span>
               <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
-              <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
             </div>
             <div class="subid" id="subid"></div>
-            <div class="cardlabel">Investment Summary</div>
             <div class="facts" id="facts"></div>
             <div class="memo" id="memo"></div>
             <details class="detail">
@@ -260,6 +272,7 @@ const fmtX=v=>v==null||isNaN(v)?'—':(+v).toFixed(2)+'×';
 const isNA=v=>v==='—'||(typeof v==='string'&&v.includes('na">'));
 const kv=(lab,val)=>`<span class="kv"><span class="k">${lab}</span> <span class="v${isNA(val)?' na':''}">${val}</span></span>`;
 const inline=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}</div>`;
+const inlineMore=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}<span class="sep">•</span></div>`;
 
 // access form wiring
 const accFields=['accName','accEmail','accCompany'];
@@ -360,10 +373,12 @@ function renderSummary(fs){
   const ltv = t.ltv!=null?` (${fmtP(t.ltv)} LTV)`:'';
   const exit = `${fmtM(t.sale_price)}`+(t.exit_cap!=null?` @ ${fmtP(t.exit_cap)} cap`:'');
   const occStr = (occ&&occ.going_in!=null)?`${fmtP(occ.going_in)} → ${fmtP(occ.stabilized)} stabilized`:'<span class="na">not found</span>';
-  const deal=inline(
+  const deal=inlineMore(
     kv('Acquisition price',fmtM(t.purchase_price)),
     kv('Total investment',fmtM(t.total_cost)),
     kv('Hold',(s.hold&&s.hold.months)?`${s.hold.months} mo`:'—'),
+  );
+  const dealExit=inline(
     kv('Exit',exit),
   );
   const ret=inline(
@@ -371,17 +386,19 @@ function renderSummary(fs){
     kv('Levered IRR',fmtP(t.levered_irr)),
     kv('Equity multiple',fmtX(t.levered_em)),
   );
-  const debt=inline(
+  const debt=inlineMore(
     kv('Total debt',fmtM(t.debt)+ltv),
     kv('Interest rate',rateText(s)),
+  );
+  const debtDscr=inline(
     kv('DSCR health',dscrText(t.dscr_health)),
   );
   const ops=inline(
     kv('NOI (in→exit)',`${fmtM(noi.going_in)} → ${fmtM(noi.exit)}`),
     kv('Occupancy (in→stab)',occStr),
   );
-  $('facts').innerHTML=`<h3>Deal</h3>${deal}<h3>Returns</h3>${ret}`+
-    `<h3>Debt &amp; coverage</h3>${debt}<h3>Operations</h3>${ops}`;
+  $('facts').innerHTML=`<div class="cardlabel">Investment Summary</div><h3>Deal</h3>${deal}${dealExit}<h3>Returns</h3>${ret}`+
+    `<h3>Debt &amp; coverage</h3>${debt}${debtDscr}<h3>Operations</h3>${ops}`;
 }
 
 function renderDetail(d, fs){
