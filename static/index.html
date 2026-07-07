@@ -10,31 +10,30 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <style>
   :root{
-    --bg:#050608; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
-    --line:#e6e8ec; --accent:#6d5bff; --accent-bg:#eaf1fb; --good:#17742a; --good-bg:#e7f4ea;
-    --page-fg:#ffffff; --page-muted:rgba(255,255,255,.55);
+    --bg:#ffffff; --card:#ffffff; --ink:#1c2024; --muted:#6b7280; --hint:#9aa1ab;
+    --line:#e6e8ec; --accent:#305cde; --accent-bg:#eaf0fe; --good:#17742a; --good-bg:#e7f4ea;
     --radius:12px; --serif:Georgia,"Times New Roman",serif; --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
   }
   *{box-sizing:border-box}
-  body{margin:0;background-color:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;
-    background-image:radial-gradient(900px 580px at 50% -220px, rgba(205,235,255,.08), transparent 62%),
-                     linear-gradient(180deg, #050608 0%, #0A0D10 42%, #101318 100%);
-    background-attachment:fixed;
-  }
-  .wrap{max-width:1320px;margin:0 auto;padding:24px}
-  .topbar{padding:16px 24px 0;display:flex;align-items:center;justify-content:space-between}
-  .topbar .brand{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:21px;letter-spacing:0;color:var(--page-fg)}
-  .topbar .version{font-size:12px;color:var(--page-muted)}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5}
 
-  /* card layout */
-  .card-frame{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;flex-direction:column;max-width:640px;margin:98px auto 0}
-  .card-content{display:grid;grid-template-columns:1fr;padding:32px;flex:1}
+  /* header — mirrors the marketing site's header: same padding, logo position, thickness */
+  .site-header{padding:34px 52px;display:flex;align-items:center;justify-content:space-between}
+  .site-header .brand{font-family:var(--mono);font-weight:500;font-size:23px;letter-spacing:0;color:var(--ink)}
+  .site-header .version{font-size:12px;color:var(--muted)}
 
-  /* paw prints content */
-  .paw-prints-section{text-align:left}
-  .paw-prints-headline{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 24px}
-  .paw-prints-title{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:28px;font-weight:600;color:var(--ink);margin:0 0 8px}
-  .paw-prints-desc{font-size:15px;line-height:1.4;color:var(--muted);margin:0 0 48px}
+  main.page{padding-top:90px;padding-bottom:100px}
+
+  .container{max-width:1280px;margin:0 auto;padding-left:clamp(40px,9.375vw,120px);padding-right:clamp(40px,9.375vw,120px)}
+
+  .page-title{font-family:var(--mono);font-size:28px;font-weight:600;color:var(--ink);margin:0 0 32px}
+
+  /* access gate — centered, no card chrome */
+  .gate{width:100%;max-width:640px;margin:0 auto;padding:0 24px;text-align:left}
+  .gate .page-title{margin-bottom:8px}
+  .gate .paw-prints-headline{font-size:20px;font-weight:500;color:var(--ink);margin:0 0 24px}
+  .gate .paw-prints-desc{font-size:15px;line-height:1.4;color:var(--muted);margin:0 0 48px}
 
   /* access form */
   .divider{border:none;border-top:1px solid var(--line);margin:32px 0}
@@ -44,49 +43,57 @@
   .field input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
   .checkbox-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--muted);margin:0 0 10px}
   .checkbox-row input{margin-top:2px;accent-color:var(--accent)}
-
-  /* unified app card */
-  .app-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 2px 8px rgba(0,0,0,.06);max-width:1080px;margin:56px auto 0;overflow:hidden}
-
-  /* upload bar — a skinny strip at the top of the app card */
-  .upload-bar{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
-  .upload-col{flex:1;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-  .upload-col:first-child{border-right:1px dashed var(--line)}
-  .upload-col .upload-label{margin:0}
-  .upload-col-action{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .upload-generate{display:flex;align-items:center;padding:14px 20px;border-left:1px solid var(--line)}
-  .upload-status{padding:0 20px}
+  .upload-actions{display:flex;justify-content:flex-start;gap:12px;margin-top:36px}
   .upload-label{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
-  .upload-bar .upload-label{font-size:11px;margin:0}
-  .btn-upload{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
-  .btn-upload:hover:not(:disabled){background:rgba(109,91,255,.05)}
 
   /* buttons */
   button{font-family:inherit;font-size:13px;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;padding:9px 18px;cursor:pointer;font-weight:600;transition:.15s;letter-spacing:.02em}
-  button:hover:not(:disabled){background:#5835e0}
+  button:hover:not(:disabled){background:#2549b8}
   button:disabled{opacity:.4;cursor:not-allowed}
-
-  .upload-actions{display:flex;justify-content:center;gap:12px;margin-top:60px}
-
-  /* progress circle */
-  .progress-container{display:none;margin-top:14px;align-items:center;gap:12px}
-  .progress-container.active{display:flex}
-  .progress-circle{width:24px;height:24px;border-radius:50%;border:2px solid rgba(109,91,255,.2);border-top-color:var(--accent);animation:spin .8s linear infinite}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .progress-label{font-size:12px;color:var(--muted);font-weight:500}
+  .btn-upload{background:#fff;color:var(--accent);border:1.5px solid var(--accent)}
+  .btn-upload:hover:not(:disabled){background:var(--accent-bg)}
+  .ghost{background:#fff;color:var(--muted);border:1px solid var(--line)}
+  .ghost:hover:not(:disabled){background:#f5f6f8}
 
   .filechip{font-size:12px;background:#f0f2f5;border-radius:6px;padding:4px 8px;display:inline-block;margin:4px 4px 0;font-weight:500}
   .muted{color:var(--muted)} .hint{color:var(--muted)}
+  .err{color:#a32d2d;font-size:12px;margin-top:14px}
 
-  /* deal layout — sits inside the app card, below the upload bar. Single column:
-     the analysis is the product; chat is a follow-up, reached via the drawer. */
-  #dealView{opacity:0;transition:opacity .25s ease}
-  #dealView.show{opacity:1}
-  .layout{padding:20px;background:#fafafb;max-width:720px;margin:0 auto}
-  .head{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;padding:16px 20px 0}
+  /* three-pane deal shell: upload | analysis | chat pop-out space.
+     Chat is fixed at ~280px and upload at ~240px (both at a 1280px viewport,
+     scaling proportionally down to 1080px); analysis fills whatever remains. */
+  .deal-shell{display:flex;align-items:flex-start;gap:32px}
+
+  .pane-upload{flex:0 0 clamp(200px,18.75vw,240px);display:flex;flex-direction:column;gap:14px}
+  .upload-box{border:1px dashed var(--line);border-radius:10px;padding:14px}
+  .upload-box .upload-label{margin:0 0 8px;font-size:11px}
+  .upload-box .optional{color:var(--hint);font-weight:400;text-transform:none;letter-spacing:0}
+  .pane-upload button{font-size:12px;padding:8px 14px}
+  .pane-upload .filechip{font-size:11px}
+  .run-btn{width:100%;padding:10px 14px}
+  .progress-container{display:none;margin-top:4px;align-items:center;gap:10px}
+  .progress-container.active{display:flex}
+  .progress-circle{width:18px;height:18px;flex:none;border-radius:50%;border:2px solid var(--accent-bg);border-top-color:var(--accent);animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .progress-label{font-size:11px;color:var(--muted);font-weight:500}
+
+  .pane-analysis{flex:1 1 420px;min-width:360px;max-width:550px}
+  .analysis-placeholder{min-height:420px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;border:1px dashed var(--line);border-radius:var(--radius);color:var(--hint)}
+  .analysis-placeholder svg{color:var(--hint)}
+  .analysis-placeholder p{margin:0;font-size:15px;color:var(--muted);font-weight:500}
+  .analysis-placeholder p.hint-sm{font-size:13px;color:var(--hint);font-weight:400;max-width:32ch}
+
+  .pane-chat{flex:0 0 clamp(230px,21.875vw,280px);align-self:stretch}
+  .chat-cta{display:flex;justify-content:center;padding-top:4px}
+  .chat-cta button{width:100%}
+
+  /* deal content, rendered inside the analysis pane */
+  .deal-view{display:flex;flex-direction:column;gap:14px}
+  .head{display:flex;align-items:center;gap:10px;margin-bottom:2px;flex-wrap:wrap}
   .head .name{font-size:16px;font-weight:600;color:var(--ink)}
   .badge{color:var(--ink)}
-  .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;margin-bottom:16px;font-family:var(--serif)}
+  .badge.good{color:var(--good)}
+  .memo{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:24px 28px;font-family:var(--serif)}
   .memo h2{font-family:var(--serif);font-weight:500;font-size:16px;color:var(--muted);text-transform:none;letter-spacing:0;margin:18px 0 6px;border:0}
   .memo h2:first-child{margin-top:0}
   .memo p,.memo li{font-size:15.5px;line-height:1.65}
@@ -94,9 +101,9 @@
   .memo strong{font-weight:600}
 
   .cardlabel{font-family:var(--serif);font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 0 8px 2px}
-  .subid{color:var(--muted);font-size:13.5px;margin:-6px 0 14px 2px}
+  .subid{color:var(--muted);font-size:13.5px;margin:-6px 0 0 2px}
   .subid .na{color:var(--muted)}
-  .facts{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px;margin-bottom:14px}
+  .facts{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 24px}
   .facts h3{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--hint);font-weight:600;margin:18px 0 6px}
   .facts h3:first-child{margin-top:0}
   .facts .inline{font-size:14.5px;line-height:1.7;margin:0 0 4px;color:var(--ink)}
@@ -105,142 +112,144 @@
   .facts .inline .v.na{color:var(--hint);font-weight:500}
   .facts .inline .sep{color:var(--hint);margin:0 9px}
 
-  details.detail{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 16px;margin-top:14px}
+  details.detail{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 16px}
   details.detail summary{cursor:pointer;color:var(--muted);font-size:13px;list-style:none}
   details.detail summary::-webkit-details-marker{display:none}
   .detail-body{font-size:14px;margin-top:10px}
   .detail-body h4{margin:14px 0 4px;font-size:14px} .detail-body ul{padding-left:18px;margin:4px 0}
 
-  .ask-cta{display:flex;justify-content:center;margin-top:20px}
-
-  /* chat — a follow-up drawer, not a permanent rail */
-  .chat-drawer{position:fixed;inset:0;z-index:100;pointer-events:none}
-  .chat-drawer .chat-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.35);opacity:0;transition:opacity .2s ease}
-  .chat-drawer.open{pointer-events:auto}
-  .chat-drawer.open .chat-backdrop{opacity:1}
-  .chat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:420px}
-  .chat-drawer .chat{position:absolute;top:0;right:0;height:100%;width:400px;max-width:90vw;border-radius:0;border-width:0 0 0 1px;transform:translateX(100%);transition:transform .25s ease}
-  .chat-drawer.open .chat{transform:translateX(0)}
-  .chat .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted)}
-  .chat .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
-  .bub{max-width:88%;font-size:13.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
+  /* chat — lives inline in the reserved right-hand pane, not an overlay */
+  .chat-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:420px}
+  .chat-panel .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
+  .chat-panel .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+  .bub{max-width:92%;font-size:13.5px;padding:8px 11px;border-radius:12px;line-height:1.5}
   .bub.u{align-self:flex-end;background:var(--accent-bg);color:var(--accent)}
   .bub.a{align-self:flex-start;background:#f3f4f6}
-  .chat .in{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
-  .chat .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
-  .chat .in button{padding:8px 12px}
+  .chat-panel .in{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
+  .chat-panel .in input{flex:1;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .chat-panel .in button{padding:8px 12px}
+
+  #dealView{opacity:0;transition:opacity .25s ease}
+  #dealView.show{opacity:1}
+
+  @media (max-width:900px){
+    .deal-shell{flex-direction:column}
+    .pane-upload,.pane-analysis,.pane-chat{flex:1 1 auto;max-width:none;width:100%}
+  }
 </style>
 </head>
 <body>
-<div class="topbar">
+<header class="site-header">
   <div class="brand">Collie</div>
   <div class="version">Release v.1.0</div>
-</div>
+</header>
 
-<div class="wrap">
-  <div id="accessView" class="card-frame">
-    <div class="card-content">
-      <div class="paw-prints-section">
-        <h1 class="paw-prints-title">Deal Analyzer</h1>
-        <p class="paw-prints-headline">A prototype by Collie</p>
-        <p class="paw-prints-desc">Deal Analyzer reconstructs the original investment thesis from an acquisition underwriting model and compares it with actual operating performance. It is designed to help real estate investment professionals quickly understand an investment, identify what has changed since acquisition, and establish context for further analysis.</p>
+<main class="page">
+  <section id="accessView" class="gate">
+    <h1 class="page-title">Deal Analyzer</h1>
+    <p class="paw-prints-headline">A prototype by Collie</p>
+    <p class="paw-prints-desc">Deal Analyzer reconstructs the original investment thesis from an acquisition underwriting model and compares it with actual operating performance. It is designed to help real estate investment professionals quickly understand an investment, identify what has changed since acquisition, and establish context for further analysis.</p>
 
-        <hr class="divider" />
+    <hr class="divider" />
 
-        <div class="upload-label">Early Access</div>
-        <p class="paw-prints-desc" style="margin-bottom:24px">This prototype is being released to a limited group of professionals for evaluation and feedback.</p>
+    <div class="upload-label">Early Access</div>
+    <p class="paw-prints-desc" style="margin-bottom:24px">This prototype is being released to a limited group of professionals for evaluation and feedback.</p>
 
-        <div class="form-grid">
-          <label class="field">
-            <span class="field-label">Name</span>
-            <input type="text" id="accName" />
-          </label>
-          <label class="field">
-            <span class="field-label">Work Email</span>
-            <input type="email" id="accEmail" />
-          </label>
-          <label class="field">
-            <span class="field-label">Company</span>
-            <input type="text" id="accCompany" />
-          </label>
-        </div>
-
-        <label class="checkbox-row"><input type="checkbox" id="ackPrototype" /><span>I understand this is an early prototype.</span></label>
-        <label class="checkbox-row"><input type="checkbox" id="ackPermission" /><span>I confirm I have permission to upload these documents.</span></label>
-
-        <div class="upload-actions">
-          <button id="continueBtn" disabled>Continue</button>
-        </div>
-        <div id="accErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
-      </div>
+    <div class="form-grid">
+      <label class="field">
+        <span class="field-label">Name</span>
+        <input type="text" id="accName" />
+      </label>
+      <label class="field">
+        <span class="field-label">Work Email</span>
+        <input type="email" id="accEmail" />
+      </label>
+      <label class="field">
+        <span class="field-label">Company</span>
+        <input type="text" id="accCompany" />
+      </label>
     </div>
-  </div>
 
-  <div id="appView" style="display:none">
-   <div class="app-card">
-    <div id="uploadBar" class="upload-bar">
-      <div class="upload-col">
-        <div class="upload-label">1. Upload underwriting model</div>
-        <div class="upload-col-action">
+    <label class="checkbox-row"><input type="checkbox" id="ackPrototype" /><span>I understand this is an early prototype.</span></label>
+    <label class="checkbox-row"><input type="checkbox" id="ackPermission" /><span>I confirm I have permission to upload these documents.</span></label>
+
+    <div class="upload-actions">
+      <button id="continueBtn" disabled>Continue</button>
+    </div>
+    <div id="accErr" class="err"></div>
+  </section>
+
+  <section id="appView" class="container" style="display:none">
+    <h1 class="page-title">Deal Analyzer</h1>
+    <div class="deal-shell">
+
+      <aside class="pane-upload">
+        <div class="upload-box">
+          <div class="upload-label">1. Underwriting model</div>
           <button type="button" class="btn-upload" id="modelBtn">Choose a file</button>
           <div id="files"></div>
+          <input id="model" type="file" accept=".xlsx,.xls" hidden />
         </div>
-        <input id="model" type="file" accept=".xlsx,.xls" hidden />
-      </div>
-      <div class="upload-col">
-        <div class="upload-label">2. (Optional) Upload operating statements</div>
-        <div class="upload-col-action">
+        <div class="upload-box">
+          <div class="upload-label">2. Financial statements <span class="optional">(optional)</span></div>
           <button type="button" class="btn-upload" id="actualsBtn">Choose files</button>
           <div id="actualsChips"></div>
+          <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
         </div>
-        <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
-      </div>
-      <div class="upload-generate">
-        <button id="go" disabled>Generate</button>
-      </div>
-    </div>
-    <div class="upload-status">
-      <div id="progressContainer" class="progress-container">
-        <div class="progress-circle"></div>
-        <div class="progress-label" id="progressLabel">Reading model…</div>
-      </div>
-      <div id="uErr" class="muted" style="color:#a32d2d;font-size:12px;margin-top:14px"></div>
-    </div>
+        <button id="go" class="run-btn" disabled>Run Analysis</button>
+        <div id="progressContainer" class="progress-container">
+          <div class="progress-circle"></div>
+          <div class="progress-label" id="progressLabel">Reading model…</div>
+        </div>
+        <div id="uErr" class="err"></div>
+      </aside>
 
-    <div id="dealView" style="display:none">
-      <div class="head">
-        <span class="name" id="dName"></span>
-        <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
-        <span class="badge" id="aBadge"></span>
-        <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
-        <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
-      </div>
-      <div class="layout">
-        <div class="subid" id="subid"></div>
-        <div class="cardlabel">Investment Summary</div>
-        <div class="facts" id="facts"></div>
-        <div class="memo" id="memo"></div>
-        <details class="detail">
-          <summary>▸ Engine Detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
-          <div class="detail-body" id="detail"></div>
-        </details>
-        <div class="ask-cta">
-          <button type="button" class="btn-upload" id="askBtn">💬 Ask questions about this investment</button>
+      <div class="pane-analysis">
+        <div id="analysisPlaceholder" class="analysis-placeholder">
+          <svg width="48" height="48" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="10" y="6" width="36" height="44" rx="4" stroke="currentColor" stroke-width="2"/>
+            <path d="M16 34l8-10 6 6 10-14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <line x1="16" y1="42" x2="32" y2="42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <p>Your analysis will appear here</p>
+          <p class="hint-sm">Upload an underwriting model on the left and run the analysis to get started.</p>
+        </div>
+
+        <div id="dealView" style="display:none">
+          <div class="deal-view">
+            <div class="head">
+              <span class="name" id="dName"></span>
+              <span class="badge good"><span id="vbadge">✓ validated from cash flow</span></span>
+              <span class="badge" id="aBadge"></span>
+              <span class="hint" id="modeBadge" style="margin-left:auto;font-size:12px"></span>
+              <button class="ghost" id="reset" style="font-size:12px;padding:5px 10px">New deal</button>
+            </div>
+            <div class="subid" id="subid"></div>
+            <div class="cardlabel">Investment Summary</div>
+            <div class="facts" id="facts"></div>
+            <div class="memo" id="memo"></div>
+            <details class="detail">
+              <summary>▸ Engine Detail — capital structure, return profile, NOI trajectory, return on cost, sources</summary>
+              <div class="detail-body" id="detail"></div>
+            </details>
+          </div>
         </div>
       </div>
-    </div>
-   </div>
-  </div>
 
-  <div id="chatDrawer" class="chat-drawer">
-    <div class="chat-backdrop" id="chatBackdrop"></div>
-    <div class="chat">
-      <div class="ch">Ask about this deal <button type="button" class="ghost" id="closeChat" style="float:right;font-size:11px;padding:3px 8px">✕</button></div>
-      <div class="msgs" id="msgs"><div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div></div>
-      <div class="in"><input id="q" placeholder="Ask a question" /><button id="send">Send</button></div>
+      <aside class="pane-chat" id="chatPane">
+        <div id="chatCta" class="chat-cta">
+          <button type="button" class="btn-upload" id="askBtn" disabled>💬 Ask about this investment</button>
+        </div>
+        <div id="chatPanel" class="chat-panel" style="display:none">
+          <div class="ch">Ask about this deal <button type="button" class="ghost" id="closeChat" style="font-size:11px;padding:3px 8px">✕</button></div>
+          <div class="msgs" id="msgs"><div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div></div>
+          <div class="in"><input id="q" placeholder="Ask a question" /><button id="send">Send</button></div>
+        </div>
+      </aside>
+
     </div>
-  </div>
-</div>
+  </section>
+</main>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -304,7 +313,7 @@ async function analyze(){
     renderDeal(await r.json());
   }catch(e){
     progressContainer.classList.remove('active');
-    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Generate';
+    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Run Analysis';
   }
 }
 
@@ -325,9 +334,11 @@ function renderDeal(d){
   SID=d.session_id; FS=d.fact_sheet;
   const fname=(model.files[0]?.name||'Deal').replace(/\.(xlsx|xls)$/i,'');
   $('progressContainer').classList.remove('active');
-  $('go').disabled=false; $('go').textContent='Generate';
+  $('go').disabled=false; $('go').textContent='Run Analysis';
+  $('analysisPlaceholder').style.display='none';
   $('dealView').style.display='block';
   requestAnimationFrame(()=>$('dealView').classList.add('show'));
+  $('askBtn').disabled=false;
   const prop=FS.deal.property||{};
   const nm=idVal(prop.name);
   $('dName').textContent = nm ? nm.value : fname;
@@ -384,10 +395,9 @@ function renderDetail(d, fs){
   $('detail').innerHTML = extras + marked.parse(d.detail_md||'_No detail available._');
 }
 
-// chat drawer
-$('askBtn').onclick=()=>$('chatDrawer').classList.add('open');
-$('closeChat').onclick=()=>$('chatDrawer').classList.remove('open');
-$('chatBackdrop').onclick=()=>$('chatDrawer').classList.remove('open');
+// chat — inline panel inside the reserved right-hand pane
+$('askBtn').onclick=()=>{$('chatCta').style.display='none';$('chatPanel').style.display='flex';};
+$('closeChat').onclick=()=>{$('chatPanel').style.display='none';$('chatCta').style.display='flex';};
 $('send').onclick=sendChat; $('q').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
 async function sendChat(){
   const q=$('q').value.trim(); if(!q||!SID)return;
