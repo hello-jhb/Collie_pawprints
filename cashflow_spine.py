@@ -98,15 +98,29 @@ import re as _re
 _RE_MON_Y = _re.compile(r"^([A-Za-z]{3,9})[\s\-/.]+(\d{2,4})$")
 _RE_MDY = _re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$")
 _RE_YMD = _re.compile(r"^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?$")
+_RE_YEAR = _re.compile(r"^(\d{4})$")
 
 
-def _parse_textdate(s: str) -> _dt.date | None:
+def _parse_textdate(s: str, allow_bare_year: bool = False) -> _dt.date | None:
     """Parse common TEXT period headers into a date: 'Jul-2023', 'Jul 23',
-    '1/31/2023', '2023-01-31', '2023-07'. Day defaults to 1 — spacing, not the
-    day, is what matters for the axis and XIRR. Generic, not per-file."""
+    '1/31/2023', '2023-01-31', '2023-07', and (opt-in) a bare '2023'. Day
+    defaults to 1 — spacing, not the day, is what matters for the axis and
+    XIRR. A bare year STRING is opt-in (unlike the int case in _coerce_date,
+    which is unconditional) because it's not just annual summary tabs (a
+    proforma's 'ADR'/'Occupancy' row keyed off text-year headers) that carry
+    one — comp-set/scenario tabs do too, and treating every such column as a
+    candidate cash-flow-stream axis can out-compete the real engine in
+    find_spine's search. Callers that only need a level-series axis (the
+    rollup) opt in; the spine's own stream search does not."""
     s = s.strip()
     if not s or len(s) > 12:
         return None
+    if allow_bare_year:
+        m = _RE_YEAR.match(s)
+        if m:
+            y = int(m.group(1))
+            if 1900 <= y <= 2100:
+                return _dt.date(y, 12, 31)
     m = _RE_MON_Y.match(s)
     if m:
         mo = _MONTHS.get(m.group(1)[:3].lower())
@@ -138,8 +152,10 @@ def _as_date(v: Any) -> _dt.date | None:
     return None
 
 
-def _coerce_date(v: Any) -> _dt.date | None:
-    """A date from a real date, a bare year-integer, or a text header."""
+def _coerce_date(v: Any, allow_bare_year_text: bool = False) -> _dt.date | None:
+    """A date from a real date, a bare year-integer, or a text header. A bare
+    year as a STRING only counts when `allow_bare_year_text` is set — see
+    _parse_textdate for why this is opt-in rather than unconditional."""
     d = _as_date(v)
     if d is not None:
         return d
@@ -147,7 +163,7 @@ def _coerce_date(v: Any) -> _dt.date | None:
     if n is not None and 1900 <= n <= 2100 and float(n).is_integer():
         return _dt.date(int(n), 12, 31)
     if isinstance(v, str):
-        return _parse_textdate(v)
+        return _parse_textdate(v, allow_bare_year=allow_bare_year_text)
     return None
 
 
@@ -159,10 +175,14 @@ def _num(v: Any) -> float | None:
     return None
 
 
-def _date_run(seq: list[Any]) -> list[tuple[int, _dt.date]] | None:
+def _date_run(seq: list[Any], allow_bare_year_text: bool = False) -> list[tuple[int, _dt.date]] | None:
     """The longest strictly-increasing run of dates / year-integers in a 0-indexed
     sequence of cells. Year-ints (1990..2100, step 1) become Dec-31 of that year.
-    Returns [(index, date), ...] or None if shorter than _MIN_PERIODS."""
+    `allow_bare_year_text` additionally treats a bare year STRING ('2023') as a
+    period marker — opt in only for callers building a level-series axis (see
+    _parse_textdate); the spine's own candidate-stream search leaves it off so a
+    comp-set/scenario tab with a text-year header can't out-compete the real
+    engine. Returns [(index, date), ...] or None if shorter than _MIN_PERIODS."""
     best: list[tuple[int, _dt.date]] = []
     cur: list[tuple[int, _dt.date]] = []
 
@@ -174,7 +194,7 @@ def _date_run(seq: list[Any]) -> list[tuple[int, _dt.date]] | None:
 
     prev: _dt.date | None = None
     for i, v in enumerate(seq):
-        d = _coerce_date(v)
+        d = _coerce_date(v, allow_bare_year_text=allow_bare_year_text)
         if d is not None and (prev is None or d > prev):
             cur.append((i, d))
             prev = d

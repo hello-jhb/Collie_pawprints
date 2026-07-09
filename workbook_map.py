@@ -98,6 +98,13 @@ _CONCEPT_VOCAB: list[tuple[str, tuple[str, ...]]] = [
     # after the flow concepts so a real revenue/opex row is never restolen here.
     ("occupancy",      ("occupancy", "% occupied", "occupied %")),
     ("vacancy",        ("vacancy", "vacant")),
+    # ADR/RevPAR are hotel rate LEVELS (a $ figure per key/night), not flows —
+    # read as a level-series (averaged, not summed) by
+    # cashflow_rollup.rate_level_candidates, same treatment as occupancy. RevPAR
+    # before ADR: "revpar" doesn't contain "adr" so order doesn't matter here,
+    # but keep both explicit so a stray "average daily rate" spelled out still binds.
+    ("revpar",         ("revpar", "rev par")),
+    ("adr",            ("average daily rate", "adr")),
     # --- returns ---
     ("unlevered_irr",  ("unlevered irr", "unleveraged irr", "un-levered irr",
                         "unlevered return", "project un-levered")),
@@ -164,6 +171,7 @@ _MONEY = {"purchase_price", "total_cost", "debt", "equity", "exit_value", "noi",
           "revenue", "opex", "capex", "debt_service", "levered_cf", "unlevered_cf"}
 _COUNT = {"hold_period"}
 _RATE_LEVEL = {"occupancy", "vacancy"}     # a % — fraction (0.92) or percent (92)
+_DOLLAR_LEVEL = {"adr", "revpar"}          # a $ rate (per key/night) — not a % or a flow
 
 
 def _passes_domain(concept: str, value: Any) -> bool:
@@ -180,6 +188,8 @@ def _passes_domain(concept: str, value: Any) -> bool:
         return abs(v) >= 1000.0
     if concept in _COUNT:
         return 0 < v <= 40 and float(v).is_integer()
+    if concept in _DOLLAR_LEVEL:
+        return 10.0 <= v <= 100_000.0
     if concept in _RATE_LEVEL:
         return 0.0 <= v <= 100.0           # rejects $-loss and room-count rows
     return True

@@ -41,12 +41,28 @@ _ARCHETYPE_LENS = {
         "The value engine is the rent jump from repositioning. An NOI miss matters if "
         "rents/occupancy aren't responding to capex (thesis failing); it's tolerable if "
         "it's timing. Revenue ahead = thesis landing; a cost overrun is execution risk."),
+    "value-add / repositioning": (
+        "Value comes from re-rating the asset after a capital renovation; the mid-hold "
+        "NOI trough is planned downtime, not weak demand. Watch renovation timing/cost "
+        "and whether the new rate holds post-reopening — not lease-up absorption."),
     "core-plus": (
         "Mostly stabilized with a thin upside lever (inflation-plus rent growth). A miss "
         "eats the modest premium quickly — less cushion than value-add."),
     "core": (
         "Flat NOI, no ramp, no cushion — in-place yield is the thesis. Any meaningful NOI "
         "miss is direct and concerning; stability itself is what's being underwritten."),
+}
+
+# Internal archetype labels -> plain phrases for prose that reaches the reader
+# (the thesis headline, the rendered fact sheet GPT is given). Keeps the
+# deterministic classifier's precise vocabulary out of the memo's voice.
+_LABEL_DISPLAY = {
+    "opportunistic / development": "development / lease-up",
+    "value-add / repositioning": "repositioning",
+    "value-add": "value-add",
+    "core-plus": "core-plus",
+    "core": "core",
+    "unknown": "unknown",
 }
 
 
@@ -116,10 +132,20 @@ def _classify_archetype(dt: dict, traj: dict) -> dict[str, Any]:
         else:
             label, conf = "unknown", "low"
 
+    # A reposition (mid-hold V-shaped NOI trough + capex concentrated in it, on
+    # an asset that was already operating) is a more specific read than plain
+    # value-add / development and overrides either — it is what actually
+    # happened here, not what the going-in ratios alone would suggest.
+    reposition = traj.get("reposition")
+    if reposition:
+        label, conf = "value-add / repositioning", "high"
+
     deal_type = (dt.get("deal_type") or "").lower()
     strategy_conflict = (deal_type == "development" and label in ("core", "core-plus"))
     if strategy_conflict:
         conf = "medium"          # behaves flat, but underwritten as development — flag it
+
+    bridge = traj.get("revpar_bridge") or {}
 
     def _r(x):
         return round(x, 3) if isinstance(x, (int, float)) else None
@@ -128,6 +154,8 @@ def _classify_archetype(dt: dict, traj: dict) -> dict[str, Any]:
         "noi_appearance_months": noi_start,
         "going_in_noi_pct_of_stabilized": _r(pct), "noi_growth": _r(growth),
         "capex_intensity": _r(capex_int), "financing": rate, "deal_type": deal_type or None,
+        "revpar_lever": bridge.get("lever"), "revpar_rate_share": _r(bridge.get("rate_share")),
+        "reposition": reposition,
     }
     return {"label": label, "confidence": conf, "signals": signals,
             "strategy_conflict": strategy_conflict, "lens": _ARCHETYPE_LENS.get(label, "")}
@@ -271,6 +299,60 @@ def _performance_claims(fs: dict, perf: dict) -> list[dict]:
     return claims
 
 
+def _lever_phrase_and_guardrail(lever: str | None, gi_occ, stab_occ, has_adr: bool) -> tuple[str, str]:
+    """Names the actual value lever (rate vs. occupancy vs. both) behind the NOI
+    ramp instead of defaulting to occupancy. `lever` comes from the computed
+    RevPAR bridge (hospitality only); when there's no rate series to test against
+    (every other property type), occupancy remains the conventional value-add
+    lever and is asserted as before — this is what keeps a genuine multifamily/
+    office lease-up reading occupancy-led rather than going silent."""
+    if lever == "rate":
+        if isinstance(gi_occ, (int, float)) and isinstance(stab_occ, (int, float)):
+            occ_move = "flat" if abs(stab_occ - gi_occ) < 0.03 else ("down" if stab_occ < gi_occ else "up")
+        else:
+            occ_move = "flat"
+        phrase = ", and rate (ADR) — not occupancy — is the lever driving it"
+        guard = (f" The value lever is RATE (ADR); occupancy is {occ_move}. "
+                 "Do not attribute the ramp to occupancy.")
+        return phrase, guard
+    if lever == "occupancy":
+        guard = (" The value lever is OCCUPANCY, not rate. Do not attribute the ramp to rate."
+                 if has_adr else "")
+        return ", and occupancy is the lever driving it", guard
+    if lever == "rate + occupancy":
+        return ", driven by both rate (ADR) and occupancy", ""
+    if lever is None and isinstance(gi_occ, (int, float)) and isinstance(stab_occ, (int, float)):
+        return ", and occupancy is the lever driving it", ""
+    return "", ""
+
+
+def _phasing_summary(ph: dict) -> str:
+    """One-line phase summary shared by the render dump and the phasing claim —
+    so every date/duration GPT might echo also appears on the fact sheet (the
+    numeric-grounding check compares narration against it). Any boundary the
+    series couldn't pin renders 'not determinable from the model'."""
+    kind = ph.get("kind")
+    noun = "renovation" if kind == "repositioning" else "construction"
+    verb = "reopen" if kind == "repositioning" else "delivery"
+    br = ph.get("build_or_reno") or {}
+    parts: list[str] = []
+    if br.get("months") is not None:
+        cap = br.get("capex_share")
+        cap_str = f" ({cap*100:.0f}% of capex)" if isinstance(cap, (int, float)) else ""
+        parts.append(f"≈{br['months']}-mo {noun}{cap_str}")
+    else:
+        parts.append(f"{noun} window not determinable from the model")
+    reopen = ph.get("delivery_or_reopen")
+    if reopen:
+        parts.append(f"{verb} {reopen}")
+    stab = ph.get("stabilization")
+    parts.append(f"stabilize {stab}" if stab else "stabilization not determinable from the model")
+    psh = ph.get("post_stab_hold_months")
+    if isinstance(psh, (int, float)):
+        parts.append(f"{psh} mo post-stab hold")
+    return " · ".join(parts)
+
+
 def _acquisition_claims(fs: dict) -> list[dict]:
     a = fs["deal"]["archetype"]
     t = fs["deal"]["targets"]
@@ -283,25 +365,52 @@ def _acquisition_claims(fs: dict) -> list[dict]:
     def m(v):
         return _k(v) if isinstance(v, (int, float)) else "—"
 
-    # thesis — NOI ramp tied to occupancy (the operating story behind the value)
+    # thesis — NOI ramp tied to whichever operating lever actually moved.
     sig = a["signals"]
     growth = sig.get("noi_growth")
     gi_occ, stab_occ = sig.get("going_in_occupancy"), sig.get("stabilized_occupancy")
     occ_str = (f"; occupancy {gi_occ*100:.0f}% → {stab_occ*100:.0f}%"
                if isinstance(gi_occ, (int, float)) and isinstance(stab_occ, (int, float)) else "")
+    adr = fs["operating"].get("adr")
+    adr_str = ""
+    if adr and isinstance(adr.get("going_in"), (int, float)) and isinstance(adr.get("stabilized"), (int, float)):
+        adr_str = f"; ADR ${adr['going_in']:,.0f} → ${adr['stabilized']:,.0f}"
+    lever_phrase, lever_guard = _lever_phrase_and_guardrail(
+        sig.get("revpar_lever"), gi_occ, stab_occ, bool(adr_str))
+    display_label = _LABEL_DISPLAY.get(a["label"], a["label"])
     claims.append({
         "id": "thesis", "direction": a["label"], "confidence": a["confidence"],
-        "headline": f"{a['label'].title()} — NOI {m(nb['going_in'])} → {m(nb['exit'])}"
-                    + (f" ({growth*100:+.0f}%)" if isinstance(growth, (int, float)) else "") + occ_str,
+        "headline": f"{display_label.title()} — NOI {m(nb['going_in'])} → {m(nb['exit'])}"
+                    + (f" ({growth*100:+.0f}%)" if isinstance(growth, (int, float)) else "")
+                    + occ_str + adr_str,
         "what_changed": "", "why": a["lens"],
         "why_matters": (f"Going-in NOI is {sig.get('going_in_noi_pct_of_stabilized', '?')} of "
-                        "stabilized — the value to be created is the ramp"
-                        + (", and occupancy is the lever driving it." if occ_str else ".")),
+                        "stabilized — the value to be created is the ramp" + lever_phrase + "."),
         "implication": (f"Underwritten exit {m(t['sale_price'])} at a {pct(t['exit_cap'])} cap."),
-        "sources": ["archetype", "noi_bridge", "occupancy"],
-        "guardrail": (f"Read this as a {a['label']} deal (lens above)."
+        "sources": ["archetype", "noi_bridge", "occupancy", "revpar_bridge"],
+        "guardrail": (f"Read this as a {display_label} deal (lens above)."
                       + (" Note: underwritten as development but hold-period NOI is flat — "
-                         "flag the strategy/behaviour mismatch." if a.get("strategy_conflict") else ""))})
+                         "flag the strategy/behaviour mismatch." if a.get("strategy_conflict") else "")
+                      + lever_guard)})
+    # phasing — the explicit build/reno → reopen → lease-up → stabilization
+    # timeline. Only for a development or repositioning; omitted for a stabilized
+    # deal (kind "none"/absent). Complements, not duplicates, the coverage claim.
+    ph = fs["deal"].get("phasing")
+    if ph and ph.get("kind") and ph["kind"] != "none":
+        summary = _phasing_summary(ph)
+        if ph["kind"] == "repositioning":
+            why_matters = ("Renovation duration and cost are the execution risk — plus whether the "
+                           "re-rated ADR holds after reopening — not lease-up absorption.")
+        else:
+            why_matters = ("Delivery timing and lease-up absorption are the execution risk; in-place "
+                           "NOI before delivery is expected to be near zero, not a miss.")
+        claims.append({
+            "id": "phasing", "direction": ph["kind"], "confidence": ph.get("confidence", "T2"),
+            "headline": summary, "what_changed": "",
+            "why": f"Phase boundaries read from the dated NOI + capex series (`{ph.get('source', '')}`).",
+            "why_matters": why_matters, "implication": "", "sources": ["phasing"],
+            "guardrail": (f"State the phasing exactly as computed ({summary}). Do not invent or "
+                          "round dates or durations the fact sheet doesn't carry.")})
     # return_profile
     claims.append({
         "id": "return_profile", "direction": "", "confidence": "T1",
@@ -318,13 +427,17 @@ def _acquisition_claims(fs: dict) -> list[dict]:
     fin_note = (" Debt is floating but rate-capped, so the rate tail is bounded." if (floating and capped)
                 else " Debt is floating and uncapped — a higher-rate path compresses coverage." if floating
                 else "")
+    # A reposition's low-coverage window is planned renovation downtime, not
+    # lease-up absorption — label it accordingly so the risk narrative doesn't
+    # misread a rooms-offline renovation as a demand problem.
+    low_point_phase = "renovation disruption" if a["label"] == "value-add / repositioning" else "lease-up"
     if dh and dh.get("available") and dh.get("healthy"):
         claims.append({
             "id": "structural_risk", "direction": "coverage", "confidence": "T1",
             "headline": f"Debt coverage holds — DSCR ≥1.2× through stabilization"
                         + (f" (min post-stab {dh['min_dscr_post_stab']}×)" if dh.get("min_dscr_post_stab") else ""),
             "what_changed": "", "why": f"Stabilized NOI covers debt service with headroom; the low "
-                            f"point {dh['min_dscr_overall']}× was during lease-up, not stabilized operations.",
+                            f"point {dh['min_dscr_overall']}× was during {low_point_phase}, not stabilized operations.",
             "why_matters": "Coverage is the real gate." + fin_note,
             "implication": "", "sources": ["dscr_health", "rate_type"],
             "guardrail": "DSCR is healthy post-stabilization; do NOT frame floating rate as the "
@@ -349,6 +462,31 @@ def _acquisition_claims(fs: dict) -> list[dict]:
             "implication": "", "sources": ["rate_type"],
             "guardrail": "Financing is FLOATING; do not assume fixed-rate. Frame risk as coverage, "
                          "not the rate type alone."})
+
+    # ramp_quality — when the model carries a parallel undisrupted/unaffected NOI
+    # read, note the organic-vs-model-supported split rather than letting the
+    # (possibly guarantee/disruption-credit-propped) headline NOI pass as fully
+    # organic. T3: a single model-labeled line, not a validated spine number —
+    # surfaced as context, never asserted with headline confidence.
+    und = fs["operating"].get("noi_undisrupted")
+    if (und and isinstance(und.get("stabilized"), (int, float))
+            and isinstance(nb.get("exit"), (int, float)) and nb["exit"]):
+        gap = und["stabilized"] - nb["exit"]
+        if abs(gap) / abs(nb["exit"]) >= 0.05:
+            claims.append({
+                "id": "ramp_quality", "direction": "up" if gap > 0 else "down", "confidence": "T3",
+                "headline": f"Model also carries an undisrupted-case NOI read: "
+                            f"{m(und.get('going_in'))} → {m(und['stabilized'])}",
+                "what_changed": "",
+                "why": f"`{und.get('source', '')}` — the model's own undisrupted/unaffected scenario, "
+                       "separate from the reported NOI line (which can carry an NOI-guarantee or "
+                       "disruption-credit).",
+                "why_matters": "Context on how much of the ramp is model-supported vs. organic — "
+                               "a single labeled line, not a footed or validated figure.",
+                "implication": "", "sources": ["noi_undisrupted"],
+                "guardrail": f"An undisrupted-case NOI read exists ({m(und['stabilized'])} stabilized) "
+                             f"alongside the reported NOI ({m(nb['exit'])} exit) — cite it as model-"
+                             "provided context (T3), not as validated fact, and do not conflate the two."})
 
     # where_to_look — point the reader at the source tab/rows behind the thesis
     noi_src = (fs["operating"].get("noi") or {}).get("source")
@@ -495,6 +633,10 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
     }
     deal["targets"].update(_cashflow_metrics(file_path, dt))
     deal["targets"]["dscr_health"] = analysis.get("dscr_health")
+    # Phase timeline (build/reno → delivery/reopen → lease-up → stabilization →
+    # post-stab hold), computed deterministically off the NOI + capex series.
+    # "none" (or absent) for a stabilized deal — the phasing claim then omits.
+    deal["phasing"] = traj.get("phasing")
     # Tier-3 property identity for the Summary header (best-effort, labels misses).
     try:
         from property_id import property_identity
@@ -507,6 +649,23 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
     # bookends + by_year trend, or None when the model has no date-axis occupancy row
     # (then the render says "not found" rather than blanking it). [[investment-read-v2]]
     operating["occupancy"] = traj.get("occupancy")
+    # ADR/RevPAR — hotel rate LEVELS, same treatment as occupancy. None outside
+    # hospitality deals. revpar_bridge names the dominant lever (rate vs.
+    # occupancy) behind the RevPAR change — the thesis claim reads it so it never
+    # has to assume occupancy is what's driving the ramp.
+    operating["adr"] = traj.get("adr")
+    operating["revpar"] = traj.get("revpar")
+    operating["revpar_bridge"] = traj.get("revpar_bridge")
+    # A parallel undisrupted/unaffected NOI read, where the model carries one —
+    # separate from a headline NOI that may be propped by an NOI-guarantee or
+    # disruption-credit line. T2/T3: a single model-labeled line, not spine-validated.
+    # Keeps "stabilized" (unlike _traj_pts) since that's what the ramp_quality
+    # claim compares against the headline's exit NOI.
+    _und = traj.get("noi_undisrupted")
+    operating["noi_undisrupted"] = ({"going_in": _und.get("going_in"), "exit": _und.get("exit"),
+                                     "stabilized": _und.get("stabilized"),
+                                     "by_year": _und.get("by_year"), "source": _und.get("source")}
+                                    if _und else None)
     operating["components"] = {
         c: {"total": d["total"], "footed": d["footed"],
             "components": [{"label": x["label"], "stabilized": x["stabilized"],
@@ -538,7 +697,7 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
     # values the trajectory replaced. Keep all other guardrails (debt, exit, floating).
     import re as _re
     _superseded = _re.compile(
-        r"disagree on (noi|revenue|opex|operating expense|capex|interest)", _re.I)
+        r"disagree on (noi|revenue|opex|operating expense|capex|interest|adr|revpar)", _re.I)
     guardrails = [g["message"] for g in (dt.get("guardrails") or [])
                   if g.get("message") and not _superseded.search(g["message"])]
 
@@ -588,7 +747,7 @@ def render_fact_sheet(fs: dict) -> str:
         from property_id import identity_line
         L.append(f"PROPERTY: {identity_line(prop)}")
     a = fs["deal"]["archetype"]
-    L.append(f"ARCHETYPE: {a['label']} ({a['confidence']} confidence)")
+    L.append(f"ARCHETYPE: {_LABEL_DISPLAY.get(a['label'], a['label'])} ({a['confidence']} confidence)")
     L.append(f"  signals: {a['signals']}")
     s, t = fs["deal"]["strategy"], fs["deal"]["targets"]
     L.append(f"STRATEGY: {s['deal_type']} · hold {s['hold']['months']} mo · {s['financing']}"
@@ -615,6 +774,9 @@ def render_fact_sheet(fs: dict) -> str:
                  f"(stab {dh['stabilization_month']})")
     else:
         L.append("  DSCR health: not available from model (no debt-service flow)")
+    ph = fs["deal"].get("phasing")
+    if ph and ph.get("kind") and ph["kind"] != "none":
+        L.append(f"PHASING: {_phasing_summary(ph)}  ({ph.get('confidence', '')})")
     L.append(f"  cost {M(t['total_cost'])} · debt {M(t['debt'])} · equity {M(t['equity'])} · LTC {P(t['ltc'])}")
     dc = fs.get("confidence", {}).get("data_coverage") or {}
     if dc:
@@ -665,13 +827,23 @@ HARD RULES (a violation makes the read worthless):
 2. Obey EVERY guardrail. Never contradict one. They override your instincts.
 3. The Claims are your findings — do not flip an attribution or change a direction. Explain them.
 4. Apply the archetype lens when judging whether something is concerning or expected.
-5. Tie the NOI trend to OCCUPANCY when occupancy is given — occupancy is the lever behind the ramp.
+5. Tie the NOI trend to WHICHEVER OPERATING LEVER IS ACTUALLY MOVING — rate (ADR/RevPAR) or
+   occupancy — per the thesis claim's stated lever. Do NOT assume occupancy is the lever by
+   default: if occupancy is flat or falling while rate (ADR) rises, this is a RATE-LED story and
+   the ramp must be credited to rate, not occupancy. The claims and guardrails already name the
+   lever — follow them.
 6. Frame risk as COVERAGE, not rate type. Do NOT lead with "floating-rate risk": floating debt is
    usually capped, so the real question is whether NOI sustains ≥1.2× DSCR (use the DSCR Health claim).
    Only flag the rate when coverage is actually at risk or unmeasurable.
-7. For acquisitions keep risk GENERIC to the archetype (market/demand vs hold for core; lease-up /
-   reposition execution for value-add; delivery/absorption for development). For performance mode, be
-   SPECIFIC: surface operating flags (bad debt, unbudgeted R&M, insurance) as recurring risk.
+7. For acquisitions keep risk GENERIC to the archetype (market/demand vs hold for core; lease-up
+   execution for value-add; renovation timing/cost and rate hold-up for a repositioning; delivery/
+   absorption for development). For performance mode, be SPECIFIC: surface operating flags (bad
+   debt, unbudgeted R&M, insurance) as recurring risk.
+7b. When a PHASING claim is present, you MAY open the thesis finding with its timeline — one clause
+   naming the build/renovation period and stabilization — then the lever and the risk. State dates
+   and durations EXACTLY as the phasing claim carries them; never invent, round, or interpolate a
+   date the fact sheet doesn't show. A boundary marked "not determinable from the model" must be
+   left as unknown, not guessed.
 8. Write investment prose, not a metric list. Tight. An analyst's voice, not a dashboard.
 9. Areas for Review are POINTERS to investigate, not prescribed actions — phrase them as
    things worth investigating further, proportional to the issue, never as directives.
@@ -682,11 +854,13 @@ HARD RULES (a violation makes the read worthless):
 12. The reader already has the deal facts (acquisition price, IRR, debt, NOI, occupancy) in a
     separate summary card above this read — do NOT restate them or open with a scored verdict.
     Go straight to what changed and why it matters; the facts card already did the orienting.
+    Every number in the facts card is already visible to the reader; do not spend a bullet
+    re-stating one without adding why it matters.
 
 OUTPUT — exactly these two sections, markdown headers:
 ## Key Findings
-   3–5 bullets, each an evidence-backed observation drawn from the Claims — what happened AND
-   why it matters, not just a restated number. Lead with the most important.
+   EXACTLY 3 bullets, each an evidence-backed observation drawn from the Claims — what happened
+   AND why it matters, not just a restated number. Lead with the most important.
 ## Areas for Review
    1–2 items that most affect future performance or risk (coverage-framed, not rate-alarmist),
    framed as pointers to investigate further — not as recommended actions.
@@ -706,13 +880,15 @@ def _prompt_payload(fs: dict) -> str:
     return "\n".join(lines)
 
 
-def _deterministic_read(fs: dict) -> str:
+def _deterministic_read(fs: dict, reason: str = "no_api_key") -> str:
     out = ["## Key Findings"]
     for c in fs.get("claims", []):
         out.append(f"- **{c['headline']}** — {c.get('why','')}"
                    + (f" {c['implication']}" if c.get("implication") else ""))
-    out += ["", "## Areas for Review",
-            "_(Narrative read requires an API key; showing the computed findings above.)_"]
+    note = ("Narrative read requires an API key; showing the computed findings above."
+            if reason == "no_api_key" else
+            "Narrative read failed; showing the computed findings above.")
+    out += ["", "## Areas for Review", f"_({note})_"]
     return "\n".join(out)
 
 
@@ -784,12 +960,13 @@ def build_investment_read(file_path, dt=None, analysis=None, perf=None,
         return {"ok": True, "source": "deterministic", "fact_sheet": fs,
                 "md": _deterministic_read(fs)}
     try:
-        md = complete(_SYSTEM_PROMPT, _prompt_payload(fs), temperature=0.2)
+        md = complete(_SYSTEM_PROMPT, _prompt_payload(fs))
     except Exception as e:                                  # pragma: no cover - defensive
         log.warning("[%s] investment read GPT call failed (%s: %s); falling back to "
                     "deterministic", analysis_id, type(e).__name__, e)
         return {"ok": True, "source": "deterministic", "fact_sheet": fs,
-                "md": _deterministic_read(fs), "note": f"{type(e).__name__}: {e}"}
+                "md": _deterministic_read(fs, reason="call_failed"),
+                "note": f"{type(e).__name__}: {e}"}
     log.info("[%s] investment read source=gpt", analysis_id)
     _check_numeric_grounding(md, render_fact_sheet(fs), analysis_id)
     return {"ok": True, "source": "gpt", "fact_sheet": fs, "md": md}

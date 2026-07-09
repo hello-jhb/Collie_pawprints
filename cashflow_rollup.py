@@ -143,6 +143,53 @@ def occupancy_candidates(rollup: dict) -> list[dict]:
     return out
 
 
+def _as_dollar_level_series(item: dict) -> list[tuple[str, float]] | None:
+    """ADR/RevPAR coerced to a per-key dollar rate, or None if implausible. Like
+    occupancy, this is a LEVEL (a $ rate), never summed. Rows arrive $-SCALED by
+    the sheet's declared units (rollup_sheet already multiplied by sheet_scale) —
+    but a per-key rate is not an aggregate financial line, so (like occupancy)
+    divide that scale back out rather than let a '$ in 000s' header push a $525
+    ADR to $525,000. Plausibility-gates by magnitude ($10-$100,000/night) and
+    rejects mostly-negative rows (a $ rate is never negative)."""
+    sc = item.get("sheet_scale") or 1.0
+    raw = [(d, v / sc) for d, v in item.get("by_period", []) if isinstance(v, (int, float))]
+    if len(raw) < 3:
+        return None
+    vals = [v for _, v in raw]
+    med = _median([abs(v) for v in vals])
+    if not (10.0 <= med <= 100_000.0):
+        return None
+    if sum(1 for v in vals if v >= 0) < 0.9 * len(vals):
+        return None
+    return raw
+
+
+def rate_level_candidates(rollup: dict, concept: str) -> list[dict]:
+    """Every ADR/RevPAR LEVEL series in the workbook for the given concept
+    ("adr" or "revpar"), plausibility-gated and averaged per year (a level, so
+    mean, never sum) — mirrors occupancy_candidates. Choosing WHICH series is
+    the deal's own rate (vs. a market/comp-set benchmark living on the same
+    sheet) is the caller's job; this just yields clean candidates."""
+    out: list[dict] = []
+    for it in rollup.get("line_items", []):
+        if it.get("concept") != concept:
+            continue
+        series = _as_dollar_level_series(it)
+        if not series:
+            continue
+        by_year_vals: dict[int, list[float]] = {}
+        for d, v in series:
+            by_year_vals.setdefault(int(str(d)[:4]), []).append(v)
+        by_year = {y: round(sum(vs) / len(vs), 2) for y, vs in sorted(by_year_vals.items())}
+        out.append({
+            "label": it["label"], "source": f"{it['sheet']}!row{it['row']}",
+            "sheet": it["sheet"], "kind": concept,
+            "by_period": [(d, round(v, 2)) for d, v in series],
+            "by_year": by_year, "n_periods": len(series),
+        })
+    return out
+
+
 def _label_col(grid: list[tuple], first_period_col: int) -> int:
     """The column before the period axis with the most text — the line-item
     labels. (A stray label in column A must not hijack a sheet whose labels are
@@ -160,10 +207,13 @@ def rollup_sheet(grid: list[tuple], name: str) -> dict | None:
     """Read a sheet IN FULL, find its period axis, and roll every labelled line
     item up to annual totals. Horizontal axis (periods across columns) — the
     dominant cash-flow layout. Returns None if no period axis is found."""
-    # Best horizontal axis = the row with the longest run of dates.
+    # Best horizontal axis = the row with the longest run of dates. Bare-year
+    # TEXT headers ('2023') count here — annual summary tabs (ADR/occupancy
+    # trend rows) often carry them — but NOT in the spine's own stream search,
+    # which stays off this to avoid a comp-set/scenario tab hijacking the engine.
     best = None
     for r, row in enumerate(grid):
-        run = _date_run(list(row))
+        run = _date_run(list(row), allow_bare_year_text=True)
         if run and (best is None or len(run) > len(best[1])):
             best = (r, run)
     if not best:
@@ -265,6 +315,21 @@ def _traj(it: dict) -> dict:
         "stabilized": _full_year_value(it, "stabilized"),
         "exit": _full_year_value(it, "exit"),
     }
+
+
+_RE_UNDISRUPTED = re.compile(r"undisrupted|unaffected", re.I)
+
+
+def undisrupted_noi_candidates(rollup: dict) -> list[dict]:
+    """NOI-concept rows the model itself labels as the UNDISRUPTED/UNAFFECTED
+    read — e.g. 'Unaffected NOI', 'TTM NOI (For Sale, Undisrupted)' — set apart
+    from a headline NOI line that may be propped by an NOI-guarantee or
+    disruption-credit elsewhere on the same statement. Nothing picks a "winner"
+    here (that's the caller's job, same pattern as occupancy_candidates) — this
+    just surfaces the candidates a model explicitly names as organic/undisrupted."""
+    return [_traj(it) for it in rollup.get("line_items", [])
+            if it.get("concept") == "noi" and _is_operating_row(it["label"])
+            and _RE_UNDISRUPTED.search(it["label"])]
 
 
 def concept_trajectories(rollup: dict) -> dict[str, dict]:
