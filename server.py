@@ -36,6 +36,9 @@ if not log.handlers:
 
 app = FastAPI(title="Collie", version="0.1.0")
 
+MODEL_MAX_BYTES = 15 * 1024 * 1024      # underwriting workbooks: 15MB
+ACTUALS_MAX_BYTES = 5 * 1024 * 1024     # financial statements: 5MB each
+
 _STATIC = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_STATIC):
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -46,25 +49,84 @@ _SESSIONS: dict[str, dict[str, Any]] = {}
 
 
 async def _save(workdir: Path, up: UploadFile) -> Path:
+    data = await up.read()
+    if len(data) > ACTUALS_MAX_BYTES:
+        raise HTTPException(413, f"'{up.filename}' is {len(data) / 1e6:.1f}MB — financial "
+                             f"statements are limited to {ACTUALS_MAX_BYTES // (1024 * 1024)}MB.")
     p = workdir / Path(up.filename).name
-    p.write_bytes(await up.read())
+    p.write_bytes(data)
     return p
+
+
+def _limited_read(model_path: Path, model_filename: str, sid: str, note: str) -> dict:
+    """Graceful degradation: we OPENED the file but couldn't validate a cash-flow
+    engine (or a stage failed). Still report WHAT THE FILE IS — property identity +
+    sheet inventory — so the user gets a useful result, never an opaque failure.
+    The chat agent keeps its full workbook tools, so a limited read is still usable."""
+    idline = ""
+    try:
+        from property_id import property_identity, identity_line
+        idline = identity_line(property_identity(model_path))
+    except Exception as e:  # best-effort — never let identity block the response
+        log.warning("[%s] limited: property identity failed (%s)", sid, e)
+
+    # Read the inventory straight from the file (a cheap read_only open) rather than
+    # via list_sheets' UPLOAD_DIR name resolution — the whole point of limited mode
+    # is that we already know the file is openable.
+    sheets = []
+    try:
+        from wb_io import safe_load_workbook
+        wb = safe_load_workbook(model_path)
+        try:
+            for name in wb.sheetnames:
+                ws = wb[name]
+                sheets.append({"name": name, "max_row": ws.max_row, "max_col": ws.max_column})
+        finally:
+            wb.close()
+    except Exception as e:
+        log.warning("[%s] limited: sheet inventory failed (%s)", sid, e)
+
+    lines = [f"## We read your file — {Path(model_filename).name.split('__', 1)[-1]}", "", note, ""]
+    if idline:
+        lines += [f"**Property:** {idline}", ""]
+    if sheets:
+        lines.append(f"**Sheets ({len(sheets)}):**")
+        lines += [f"- {s.get('name')}  ({s.get('max_row')}×{s.get('max_col')})" for s in sheets]
+        lines.append("")
+    lines.append("Ask about any sheet — rent roll, assumptions, returns — and I'll read it directly.")
+    read_md = "\n".join(lines)
+
+    fs = {"ok": False, "mode": "limited", "version": "limited", "reason": note,
+          "property_line": idline, "sheets": sheets}
+    return {"session_id": sid, "mode": "limited", "read_md": read_md,
+            "detail_md": None, "fact_sheet": fs}
 
 
 @app.post("/api/analyze")
 async def analyze(model: UploadFile = File(...),
                   actuals: list[UploadFile] = File(default=[])):
     """Upload a model workbook (+ optional actuals statements) → the Investment Read,
-    the validated fact sheet, and the metrics the UI grid renders."""
+    the validated fact sheet, and the metrics the UI grid renders.
+
+    Robustness contract (WORKORDER_ingestion_robustness.md): a readable workbook must
+    NEVER produce an opaque failure. The whole pipeline runs inside one workbook_cache()
+    so each file loads at most once per mode; any engine/stage failure DEGRADES to a
+    `mode: "limited"` payload (property + sheet inventory) instead of a 422 or a severed
+    request. Only genuinely unreadable inputs (over the cap, not an xlsx) hard-error."""
     # Save the model into the tools' upload dir under a session-scoped name, so the
     # chat agent's file tools (search_file / read_sheet) can revisit it for the long
     # tail (rent roll, unit counts) that the engine doesn't extract.
     import tools as _tools
+    from wb_io import WorkbookLoadError, workbook_cache
+    model_bytes = await model.read()
+    if len(model_bytes) > MODEL_MAX_BYTES:
+        raise HTTPException(413, f"'{model.filename}' is {len(model_bytes) / 1e6:.1f}MB — "
+                             f"underwriting models are limited to {MODEL_MAX_BYTES // (1024 * 1024)}MB.")
     _tools.UPLOAD_DIR.mkdir(exist_ok=True)
     sid = uuid.uuid4().hex
     model_filename = f"{sid}__{Path(model.filename).name}"
     model_path = _tools.UPLOAD_DIR / model_filename
-    model_path.write_bytes(await model.read())
+    model_path.write_bytes(model_bytes)
     workdir = Path(tempfile.mkdtemp(prefix="collie_"))
     actuals_paths = [await _save(workdir, a) for a in actuals if a and a.filename]
     log.info("[%s] analyze START file=%s actuals=%d", sid, model.filename, len(actuals_paths))
@@ -73,30 +135,58 @@ async def analyze(model: UploadFile = File(...),
     from deal_analysis import build_analysis
     from interpretation import assemble_fact_sheet, build_investment_read
 
-    dt = build_deal_truth(model_path)
-    if not dt.get("engine_found", True):
-        log.warning("[%s] analyze REJECTED — no validated cash-flow engine: %s",
-                   sid, dt.get("reason"))
-        raise HTTPException(422, dt.get("reason", "no validated cash-flow engine in this workbook"))
-    analysis = build_analysis(model_path, dt=dt)
+    def _store(payload: dict, *, read_md: str | None, fs: dict, source: str | None) -> dict:
+        _SESSIONS[sid] = {"model_path": str(model_path), "model_filename": model_filename,
+                          "fact_sheet": fs, "read_md": read_md,
+                          "read_source": source, "history": None}
+        return payload
 
-    perf = None
-    if actuals_paths:
-        from perf_vs_plan_engine import build_perf_vs_plan
-        perf = build_perf_vs_plan(model_path, actuals_paths)
-        perf = perf if perf.get("ok") else None
+    # One request-scoped cache for every load below — the pipeline loads this file
+    # many times; collapse that to one-per-mode so a bloated workbook can't stack
+    # enough full loads to blow the request timeout.
+    with workbook_cache():
+        try:
+            dt = build_deal_truth(model_path)
+        except WorkbookLoadError as e:
+            log.warning("[%s] analyze — deal-truth could not load workbook: %s", sid, e.reason)
+            r = _limited_read(model_path, model_filename, sid,
+                              "We opened your file but couldn't read it deeply enough to "
+                              f"validate a cash-flow engine ({e.reason}). Here's what we can see:")
+            return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
 
-    read = build_investment_read(model_path, dt=dt, analysis=analysis, perf=perf, analysis_id=sid)
-    fs = read.get("fact_sheet") or assemble_fact_sheet(model_path, dt=dt, analysis=analysis,
-                                                        perf=perf, analysis_id=sid)
+        if not dt.get("engine_found", True):
+            log.warning("[%s] analyze — no validated cash-flow engine: %s", sid, dt.get("reason"))
+            r = _limited_read(model_path, model_filename, sid,
+                              "We read your file but couldn't auto-validate a cash-flow engine "
+                              "in it — here's what we can see; ask about any sheet.")
+            return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
+
+        # Enrichment stages: any failure degrades to limited rather than severing.
+        try:
+            analysis = build_analysis(model_path, dt=dt)
+
+            perf = None
+            if actuals_paths:
+                from perf_vs_plan_engine import build_perf_vs_plan
+                perf = build_perf_vs_plan(model_path, actuals_paths)
+                perf = perf if perf.get("ok") else None
+
+            read = build_investment_read(model_path, dt=dt, analysis=analysis,
+                                         perf=perf, analysis_id=sid)
+            fs = read.get("fact_sheet") or assemble_fact_sheet(
+                model_path, dt=dt, analysis=analysis, perf=perf, analysis_id=sid)
+        except Exception as e:  # noqa: BLE001 - never let enrichment sever the request
+            log.exception("[%s] analyze — enrichment failed after engine validated: %s", sid, e)
+            r = _limited_read(model_path, model_filename, sid,
+                              "We validated your file's engine but hit a snag building the full "
+                              "read — here's what we can see; ask about any sheet.")
+            return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
+
     log.info("[%s] analyze DONE mode=%s narrative_source=%s", sid, fs.get("mode"), read.get("source"))
-
-    _SESSIONS[sid] = {"model_path": str(model_path), "model_filename": model_filename,
-                      "fact_sheet": fs, "read_md": read.get("md"),
-                      "read_source": read.get("source"), "history": None}
-    return {"session_id": sid, "mode": fs.get("mode"),
-            "read_md": read.get("md"), "detail_md": analysis.get("md"),
-            "fact_sheet": fs}
+    payload = {"session_id": sid, "mode": fs.get("mode"),
+               "read_md": read.get("md"), "detail_md": analysis.get("md"),
+               "fact_sheet": fs}
+    return _store(payload, read_md=read.get("md"), fs=fs, source=read.get("source"))
 
 
 # Chat tools — the agent answers from the fact sheet first, REVISITS the workbook for

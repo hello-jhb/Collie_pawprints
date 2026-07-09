@@ -36,6 +36,7 @@ import openpyxl.utils as xlutils
 
 from scenarios._llm import MODEL_FAST, REASONING_EFFORT, client, llm_available
 from re_knowledge import knowledge_block
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.section_reader")
 if not log.handlers:
@@ -128,7 +129,7 @@ def detect_workbook_units(file_path: Path, summary_tabs: list[str]) -> int:
     marker but its values are still in thousands). Returns 1 / 1_000 / 1_000_000.
     """
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception:
         return 1
     mult = 1
@@ -161,7 +162,7 @@ def render_tab_as_table(file_path: Path, sheet_name: str, default_units_mult: in
     GPT can see the period columns (At Close / Year 1 / Stabilized / Exit).
     """
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception as e:
         return f"(could not load workbook: {e})"
     if sheet_name not in wb.sheetnames:

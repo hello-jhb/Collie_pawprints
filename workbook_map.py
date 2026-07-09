@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from metric_resolver import parse_numeric_value
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.map")
 if not log.handlers:
@@ -317,7 +318,7 @@ def _nearest_value(grid: list[tuple], r: int, c: int, reach: int = 8):
 def _load_grids(file_path: Path) -> dict[str, list[tuple]]:
     """Per-sheet value grids, pulled once with sequential iteration (fast)."""
     import openpyxl
-    wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+    wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     grids: dict[str, list[tuple]] = {}
     for s in wb.sheetnames:
         if s.rstrip(">").strip() == "" or s.endswith(">"):
@@ -438,7 +439,7 @@ def build_workbook_map(file_path: str | Path, use_cache: bool = True) -> dict[st
     # --- load value grids + a formula workbook for provenance -------------
     grids = _load_grids(file_path)
     try:
-        wb_form = openpyxl.load_workbook(file_path, data_only=False)
+        wb_form = safe_load_workbook(file_path, data_only=False, read_only=False)
     except Exception as e:
         return {"error": f"Could not open workbook for formulas: {e}",
                 "version": WORKBOOK_MAP_VERSION}

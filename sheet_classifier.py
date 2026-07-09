@@ -23,6 +23,7 @@ from pathlib import Path
 from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from re_knowledge import SHEET_ROLE_VOCAB, ROLE_TO_TIER
 from knowledge_store import build_runtime_knowledge_block
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.sheet_classifier")
 if not log.handlers:
@@ -65,7 +66,7 @@ def _gather_sheet_labels(file_path: Path) -> dict[str, list[str]]:
     """For each sheet, collect up to N text labels from columns A-C of the top rows."""
     import openpyxl
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception:
         return {}
 

@@ -50,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 from flexible_extractor import sheet_priority_tier
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.orientation")
 if not log.handlers:
@@ -355,8 +356,8 @@ def orient_workbook(file_path: str | Path, use_cache: bool = True) -> dict[str, 
         except Exception:
             pass  # corrupt cache → recompute
     try:
-        wb_vals = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
-        wb_form = openpyxl.load_workbook(file_path, data_only=False, read_only=True)
+        wb_vals = safe_load_workbook(file_path, data_only=True, read_only=True)
+        wb_form = safe_load_workbook(file_path, data_only=False, read_only=True)
     except Exception as e:
         log.error("Orientation failed to open %s: %s", file_path.name, e)
         return {"error": f"Could not open workbook: {e}", "version": ORIENTATION_VERSION}
@@ -485,7 +486,7 @@ def render_sheets_text(
 
     file_path = Path(file_path)
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception as e:
         log.error("Sheet render failed to open %s: %s", file_path.name, e)
         return ""
@@ -614,7 +615,7 @@ def analyst_reading_stack(
     if tier_map is None:
         try:
             import openpyxl
-            wb = openpyxl.load_workbook(file_path, read_only=True)
+            wb = safe_load_workbook(file_path, read_only=True)
             tier_map = {n: sheet_priority_tier(n) for n in wb.sheetnames}
             wb.close()
         except Exception:

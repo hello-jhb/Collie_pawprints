@@ -22,6 +22,7 @@ from typing import Any
 
 from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from flexible_extractor import sorted_sheets_by_priority
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.fallback")
 if not log.handlers:
@@ -80,7 +81,7 @@ def _sheet_to_text_block(file_path: Path, sheet_name: str) -> str:
     """Render a single sheet as compact text grid for GPT."""
     import openpyxl
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception as e:
         return f"(could not load workbook: {e})"
 

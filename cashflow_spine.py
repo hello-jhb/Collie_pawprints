@@ -95,6 +95,7 @@ def xirr(flows: list[tuple[_dt.date, float]]) -> float | None:
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
 import re as _re
+from wb_io import safe_load_workbook
 _RE_MON_Y = _re.compile(r"^([A-Za-z]{3,9})[\s\-/.]+(\d{2,4})$")
 _RE_MDY = _re.compile(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$")
 _RE_YMD = _re.compile(r"^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?$")
@@ -214,7 +215,7 @@ def _date_run(seq: list[Any], allow_bare_year_text: bool = False) -> list[tuple[
 
 def _load_grids(file_path: Path) -> dict[str, list[tuple]]:
     import openpyxl
-    wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+    wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     grids: dict[str, list[tuple]] = {}
     for s in wb.sheetnames:
         try:

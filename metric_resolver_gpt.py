@@ -23,6 +23,7 @@ from typing import Any
 
 from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from re_knowledge import knowledge_block, IDENTITY_RELATIONSHIPS
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.resolver_gpt")
 if not log.handlers:
@@ -434,7 +435,7 @@ def resolve_pool_with_gpt(record: dict, metric: dict, file_path: Path) -> dict:
     # Gather context per passing candidate
     import openpyxl
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception as e:
         log.error("Could not open workbook for context gathering: %s", e)
         return record

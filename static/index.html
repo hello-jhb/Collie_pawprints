@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Collie — Paw Prints</title>
+<title>Collie</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -91,7 +91,7 @@
   .analysis-placeholder{min-height:420px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;border:1px dashed var(--line);border-radius:var(--radius);color:var(--hint)}
   .analysis-placeholder svg{color:var(--hint)}
   .analysis-placeholder p{margin:0;font-size:15px;color:var(--muted);font-weight:500}
-  .analysis-placeholder p.hint-sm{font-size:13px;color:var(--hint);font-weight:400;max-width:32ch}
+  .analysis-placeholder p.hint-sm{font-size:13px;color:var(--hint);font-weight:400;max-width:52ch}
 
   .pane-chat{flex:0 0 clamp(230px,21.875vw,280px);align-self:stretch}
   .chat-cta{display:flex;justify-content:center;padding-top:4px}
@@ -130,7 +130,7 @@
   .detail-body h4{margin:14px 0 4px;font-size:14px} .detail-body ul{padding-left:18px;margin:4px 0}
 
   /* chat — lives inline in the reserved right-hand pane, not an overlay */
-  .chat-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;min-height:420px}
+  .chat-panel{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);display:flex;flex-direction:column;height:100%;min-height:420px;max-height:80vh;overflow:hidden}
   .chat-panel .ch{padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;justify-content:space-between}
   .chat-panel .msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
   .bub{max-width:92%;font-size:13.5px;padding:8px 11px;border-radius:0;line-height:1.5}
@@ -199,12 +199,14 @@
           <div class="upload-label">1. Underwriting model</div>
           <button type="button" class="btn-upload" id="modelBtn">Choose a file</button>
           <div id="files"></div>
+          <div class="hint" style="font-size:11px;margin-top:6px">Required — establishes the deal baseline. Max 15MB.</div>
           <input id="model" type="file" accept=".xlsx,.xls" hidden />
         </div>
         <div class="upload-box">
           <div class="upload-label">2. Financial statements <span class="optional">(optional)</span></div>
           <button type="button" class="btn-upload" id="actualsBtn">Choose files</button>
           <div id="actualsChips"></div>
+          <div class="hint" style="font-size:11px;margin-top:6px">Adds actual performance vs. the underwriting plan. Max 5MB each.</div>
           <input id="actuals" type="file" accept=".xlsx,.xls" multiple hidden />
         </div>
         <button id="go" class="run-btn" disabled>Run Analysis</button>
@@ -225,8 +227,8 @@
             <path d="M16 34l8-10 6 6 10-14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <line x1="16" y1="42" x2="32" y2="42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
-          <p>Your analysis will appear here</p>
-          <p class="hint-sm">Upload an underwriting model on the left and run the analysis to get started.</p>
+          <p>Upload files for analysis</p>
+          <p class="hint-sm">The underwriting model is required — it establishes the deal's baseline: acquisition price, projected returns, and cash flow assumptions. Financial statements are optional — add them to compare that plan against actual operating performance.</p>
         </div>
 
         <div id="dealView" style="display:none">
@@ -293,20 +295,81 @@ $('continueBtn').onclick=()=>{
 const model=$('model'), actuals=$('actuals');
 $('modelBtn').onclick=()=>model.click();
 $('actualsBtn').onclick=()=>actuals.click();
+const MODEL_MAX_BYTES=15*1024*1024, ACTUALS_MAX_BYTES=5*1024*1024;
 model.onchange=actuals.onchange=refreshFiles;
 function refreshFiles(){
-  let modelChip='';
-  if(model.files[0]) modelChip=`<span class="filechip">📄 ${model.files[0].name}</span>`;
+  $('uErr').textContent='';
+  let modelChip='', modelOk=true;
+  const mf=model.files[0];
+  if(mf){
+    if(mf.size>MODEL_MAX_BYTES){
+      modelOk=false;
+      $('uErr').textContent=`"${mf.name}" is ${(mf.size/1e6).toFixed(1)}MB — underwriting models are limited to 15MB.`;
+      model.value='';
+    }else{
+      modelChip=`<span class="filechip">📄 ${mf.name}</span>`;
+    }
+  }
   $('files').innerHTML=modelChip;
 
-  let actualsHtml='';
-  for(const f of actuals.files) actualsHtml+=`<span class="filechip">📊 ${f.name}</span>`;
+  let actualsHtml='', oversized=[];
+  for(const f of actuals.files){
+    if(f.size>ACTUALS_MAX_BYTES) oversized.push(f);
+    else actualsHtml+=`<span class="filechip">📊 ${f.name}</span>`;
+  }
   $('actualsChips').innerHTML=actualsHtml;
+  if(oversized.length){
+    $('uErr').textContent=oversized.map(f=>`"${f.name}" is ${(f.size/1e6).toFixed(1)}MB — financial statements are limited to 5MB each.`).join(' ');
+  }
 
-  $('go').disabled=!model.files[0];
+  $('go').disabled=!(model.files[0]&&modelOk);
 }
 $('go').onclick=analyze;
-$('reset').onclick=()=>{location.reload();};
+$('reset').onclick=resetApp;
+function resetApp(){
+  SID=null; FS=null;
+  model.value=''; actuals.value='';
+  $('files').innerHTML=''; $('actualsChips').innerHTML='';
+  $('uErr').textContent='';
+  $('go').disabled=true; $('go').textContent='Run Analysis';
+  $('progressContainer').classList.remove('active');
+  $('progressLabel').textContent='Reading model…';
+  // Clear the rendered deal itself — not just hide it — so nothing from the prior
+  // file can flash before the next render populates (this is what made reset feel
+  // like it didn't fully clear).
+  $('dealView').classList.remove('show');
+  $('dealView').style.display='none';
+  $('dName').textContent=''; $('subid').innerHTML='';
+  $('aBadge').textContent=''; $('modeBadge').textContent='';
+  $('facts').innerHTML=''; $('memo').innerHTML=''; $('detail').innerHTML='';
+  const det=document.querySelector('#dealView details'); if(det) det.open=false;
+  $('analysisPlaceholder').style.display='flex';
+  $('askBtn').disabled=true;
+  $('chatPanel').style.display='none';
+  $('chatCta').style.display='flex';
+  $('msgs').innerHTML='<div class="bub a">Ask anything — returns, risks, what a change to capex would do. Answers come from the validated facts.</div>';
+}
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+// The API runs on Cloud Run, which can scale to zero. The FIRST request after an
+// idle period (e.g. reset → pick a new file → the instance has spun down) can
+// fail at the network layer ("Load failed"/"Failed to fetch") or return a 502/503
+// while the instance cold-starts. Retry once after a short delay before surfacing
+// the error — a warm instance answers immediately on the second try. (A File is a
+// re-readable Blob, so the same FormData can be resent.)
+async function postAnalyze(fd){
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await fetch('/api/analyze',{method:'POST',body:fd});
+      if(attempt===0 && r.status>=502 && r.status<=504){ $('progressLabel').textContent='Waking the server…'; await sleep(1500); continue; }
+      return r;
+    }catch(err){
+      if(attempt===0){ $('progressLabel').textContent='Waking the server…'; await sleep(1500); continue; }
+      throw err;
+    }
+  }
+}
 
 async function analyze(){
   $('uErr').textContent=''; $('go').disabled=true; $('go').textContent='Reading…';
@@ -314,19 +377,25 @@ async function analyze(){
   const progressLabel=$('progressLabel');
 
   // Show progress spinner
+  progressLabel.textContent='Reading model…';
   progressContainer.classList.add('active');
 
   const fd=new FormData(); fd.append('model',model.files[0]);
-  for(const f of actuals.files) fd.append('actuals',f);
+  for(const f of actuals.files) if(f.size<=ACTUALS_MAX_BYTES) fd.append('actuals',f);
   try{
-    const r=await fetch('/api/analyze',{method:'POST',body:fd});
+    const r=await postAnalyze(fd);
     if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||('HTTP '+r.status));}
     progressLabel.textContent='Analysis complete';
-    await new Promise(r=>setTimeout(r,600));
+    await sleep(600);
     renderDeal(await r.json());
   }catch(e){
     progressContainer.classList.remove('active');
-    $('uErr').textContent=String(e.message||e);$('go').disabled=false;$('go').textContent='Run Analysis';
+    const raw=String(e.message||e);
+    const networkish=/load failed|failed to fetch|networkerror|network error/i.test(raw);
+    $('uErr').textContent = networkish
+      ? 'Could not reach the server — it may still be starting up. Wait a few seconds and click Run Analysis again.'
+      : raw;
+    $('go').disabled=false;$('go').textContent='Run Analysis';
   }
 }
 
@@ -352,6 +421,21 @@ function renderDeal(d){
   $('dealView').style.display='block';
   requestAnimationFrame(()=>$('dealView').classList.add('show'));
   $('askBtn').disabled=false;
+  // Limited mode: we opened the file but couldn't validate a cash-flow engine.
+  // Show what the file IS (property + sheet inventory) and let the user chat with
+  // it — never a dead end. The full-deal render below assumes FS.deal, absent here.
+  if(d.mode==='limited' || !FS || !FS.deal){
+    $('dName').textContent = fname;
+    $('subid').innerHTML = FS && FS.property_line ? FS.property_line : 'Read in limited mode';
+    $('modeBadge').textContent='limited read';
+    $('facts').innerHTML=`<div class="cardlabel">What we can see</div>`+
+      `<p style="color:var(--muted,#888);font-size:13px">We couldn't auto-validate a `+
+      `cash-flow engine in this file, so the summary grid is unavailable — but the full `+
+      `workbook is open for chat. Ask about any sheet.</p>`;
+    $('memo').innerHTML=marked.parse(d.read_md||'');
+    $('detail').innerHTML='';
+    return;
+  }
   const prop=FS.deal.property||{};
   const nm=idVal(prop.name);
   $('dName').textContent = nm ? nm.value : fname;

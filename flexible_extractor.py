@@ -7,6 +7,7 @@ import pandas as pd
 import openpyxl
 
 from metric_catalog import load_metric_catalog
+from wb_io import safe_load_workbook
 
 
 UPLOAD_DIR = Path("uploads")
@@ -514,7 +515,7 @@ def scan_workbook_for_all_metrics(file_path, catalog):
     # openpyxl seeks the file on every ws.cell(row, col) call. For metric
     # extraction we need fast random access far more than fast streaming.
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception:
         return {m["metric_id"]: None for m in catalog}
 
@@ -698,7 +699,7 @@ def _load_grid_sheets(file_path, keep) -> tuple[list[str], dict[str, _GridSheet]
     handful, this replaces the full openpyxl load (every sheet, styles, links)
     with seconds of work.
     """
-    wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+    wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     names = list(wb.sheetnames)
     grids: dict[str, _GridSheet] = {}
     for name in names:
@@ -755,7 +756,7 @@ def scan_workbook_for_candidates(file_path, catalog, sheet_tier_map: dict | None
                 file_path, lambda n: _tier_for(n) != 99
             )
         else:
-            wb = openpyxl.load_workbook(file_path, data_only=True)
+            wb = safe_load_workbook(file_path, data_only=True, read_only=False)
             all_names = list(wb.sheetnames)
     except Exception:
         return {m["metric_id"]: [] for m in catalog}
@@ -879,7 +880,7 @@ def scan_workbook_for_metric(file_path, metric):
     """
 
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception as e:
         return None
 
@@ -1043,7 +1044,7 @@ def extract_time_series_rows(file_path, max_rows_per_sheet: int = 25, max_total_
     cash flow projections.
     """
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception:
         return []
 

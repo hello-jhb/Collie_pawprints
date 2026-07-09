@@ -24,6 +24,14 @@ def _get_api_key() -> str | None:
 _client: OpenAI | None = None
 _client_api_key: str | None = None
 
+# Explicit, SHORT per-request timeout + bounded retries. The SDK default timeout
+# is 600s — with the gpt-5.4 (reasoning) migration a single slow/hung call could
+# stall the whole /api/analyze request until Cloud Run severs it and the browser
+# shows "Load failed." Cap each call so a bad call degrades fast instead of
+# hanging the request. (WORKORDER_ingestion_robustness.md §2d/§4d.)
+LLM_TIMEOUT = float(os.getenv("OPENAI_TIMEOUT", "30"))
+LLM_MAX_RETRIES = int(os.getenv("OPENAI_MAX_RETRIES", "1"))
+
 
 def get_client() -> OpenAI | None:
     """
@@ -41,7 +49,7 @@ def get_client() -> OpenAI | None:
         return None
 
     if _client is None or api_key != _client_api_key:
-        _client = OpenAI(api_key=api_key)
+        _client = OpenAI(api_key=api_key, timeout=LLM_TIMEOUT, max_retries=LLM_MAX_RETRIES)
         _client_api_key = api_key
     return _client
 
@@ -79,19 +87,28 @@ def llm_available() -> bool:
 
 
 def complete(system: str, user: str, reasoning_effort: str = REASONING_EFFORT) -> str:
-    """Single chat completion. Returns the assistant text."""
+    """Single chat completion. Returns the assistant text.
+
+    DEGRADES on failure: a timed-out / errored call returns the unavailable
+    sentinel (which downstream already treats as "no narrative") instead of
+    raising and stalling — one slow enrichment must not sever the whole request.
+    """
     live_client = get_client()
     if live_client is None:
         return "[LLM unavailable — set OPENAI_API_KEY environment variable]"
-    response = live_client.chat.completions.create(
-        model=MODEL,
-        reasoning_effort=reasoning_effort,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
-    return response.choices[0].message.content
+    try:
+        response = live_client.chat.completions.create(
+            model=MODEL,
+            reasoning_effort=reasoning_effort,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        return response.choices[0].message.content
+    except Exception as e:  # noqa: BLE001 - degrade, don't stall the request
+        log.warning("complete() failed (%s: %s) — degrading to no-narrative", type(e).__name__, e)
+        return "[LLM unavailable — the narrative model call did not complete]"
 
 
 # ---------------------------------------------------------------------------

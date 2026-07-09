@@ -29,6 +29,7 @@ from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from workbook_map import _CONCEPT_VOCAB, _BLOCK_FOR_CONCEPT, _RATE, _MULTIPLE, _MONEY
 from flexible_extractor import sorted_sheets_by_priority
 from metric_resolver import parse_numeric_value
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.conceptfallback")
 if not log.handlers:
@@ -93,7 +94,7 @@ def _sheet_to_text_block(file_path: Path, sheet_name: str) -> str:
     """Render a single sheet as compact text grid for GPT."""
     import openpyxl
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
     except Exception as e:
         return f"(could not load workbook: {e})"
 

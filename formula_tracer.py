@@ -32,6 +32,7 @@ from openpyxl.utils.cell import coordinate_to_tuple
 from aam import AAM_METRIC_IDS
 from flexible_extractor import normalize_text
 from metric_catalog import load_metric_catalog
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.formula_tracer")
 if not log.handlers:
@@ -73,8 +74,8 @@ def trace_from_verified(
     """
     file_path = Path(file_path)
     import openpyxl
-    wb_f = openpyxl.load_workbook(file_path, data_only=False)  # formulas
-    wb_v = openpyxl.load_workbook(file_path, data_only=True)   # cached values
+    wb_f = safe_load_workbook(file_path, data_only=False, read_only=False)  # formulas
+    wb_v = safe_load_workbook(file_path, data_only=True, read_only=False)   # cached values
     sheets = set(wb_f.sheetnames)
 
     alias_index = _build_alias_index(

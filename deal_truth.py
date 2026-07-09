@@ -45,6 +45,7 @@ from workbook_map import build_workbook_map, _passes_domain, _concept_of
 from financial_model_parser import parse_workbook_tables_cached
 from cashflow_spine import find_spine, _load_grids
 from concept_fallback import find_concept
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.dealtruth")
 if not log.handlers:
@@ -223,7 +224,7 @@ def _scan_model_sheets_for_ops(m: dict, file_path: Path) -> dict:
         sheets = [engine] + [s for s in sheets if s != engine]
     out: dict[str, Any] = {}
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception:
         return out
     for sheet in sheets:

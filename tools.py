@@ -42,6 +42,7 @@ from metric_resolver_gpt import (
 )
 import extraction_cache
 from scenarios._llm import run_raw_insight_pass, llm_available
+from wb_io import safe_load_workbook
 
 # Logger writes to stdout so messages show up in Streamlit Cloud logs
 _log = logging.getLogger("fb.tools")
@@ -315,7 +316,7 @@ def _inventory_sheets_by_tier(file_path: Path) -> dict[str, Any]:
     """
     try:
         import openpyxl
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
         by_tier: dict[int, list[str]] = {}
         for s in wb.sheetnames:
             t = sheet_priority_tier(s)
@@ -437,7 +438,7 @@ def _run_bounded_extraction(
             from sheet_classifier import effective_tier
             from flexible_extractor import sheet_priority_tier
             import openpyxl as _opx
-            _wb = _opx.load_workbook(file_path, data_only=True, read_only=True)
+            _wb = safe_load_workbook(file_path, data_only=True, read_only=True)
             sheet_tier_map = {
                 name: effective_tier(name, sheet_priority_tier(name), classification)
                 for name in _wb.sheetnames
@@ -461,7 +462,7 @@ def _run_bounded_extraction(
             classification = classify_sheets(file_path) or {}
             if classification:
                 import openpyxl as _opx
-                _wb = _opx.load_workbook(file_path, data_only=True, read_only=True)
+                _wb = safe_load_workbook(file_path, data_only=True, read_only=True)
                 sheet_tier_map = {
                     name: effective_tier(name, sheet_priority_tier(name), classification)
                     for name in _wb.sheetnames
@@ -529,7 +530,7 @@ def _run_bounded_extraction(
     available_sheets: list = []
     if bounded:
         try:
-            wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+            wb = safe_load_workbook(file_path, data_only=True, read_only=True)
             available_sheets = list(wb.sheetnames)
             wb.close()
         except Exception:
@@ -1245,7 +1246,7 @@ def list_sheets(filename: str) -> dict[str, Any]:
     if not file_path.exists():
         return {"error": f"File not found: {filename}"}
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
         sheets = []
         for name in wb.sheetnames:
             ws = wb[name]
@@ -1270,7 +1271,7 @@ def read_sheet(filename: str, sheet_name: str, max_rows: int = 80) -> dict[str, 
     if not file_path.exists():
         return {"error": f"File not found: {filename}"}
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
         # Case-insensitive sheet matching, partial-match fallback
         target = None
         for name in wb.sheetnames:
@@ -1323,7 +1324,7 @@ def search_file(filename: str, query: str, max_matches: int = 30) -> dict[str, A
     if not file_path.exists():
         return {"error": f"File not found: {filename}"}
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
         q = query.lower().strip()
         matches = []
         for sheet_name in wb.sheetnames:

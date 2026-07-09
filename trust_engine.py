@@ -38,6 +38,7 @@ from typing import Any
 
 from metric_resolver import parse_numeric_value
 from scenarios._llm import client, MODEL, REASONING_EFFORT, llm_available
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.trust")
 if not log.handlers:
@@ -131,7 +132,7 @@ def _read_cells(file_path: Path, needed: dict[str, set[str]]) -> dict[tuple[str,
     from openpyxl.utils import get_column_letter
     out: dict[tuple[str, str], Any] = {}
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception as e:
         log.error("Grounding open failed for %s: %s", file_path.name, e)
         return out
@@ -176,7 +177,7 @@ def _scan_sheet_values(file_path: Path, sheets: set[str]) -> dict[str, list[tupl
     if not sheets:
         return out
     try:
-        wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     except Exception:
         return out
     for sheet in sheets:

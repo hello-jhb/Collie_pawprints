@@ -39,6 +39,7 @@ from typing import Any
 
 import openpyxl
 from openpyxl.utils import get_column_letter
+from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.model_parser")
 if not log.handlers:
@@ -263,7 +264,7 @@ def parse_workbook_tables(file_path: str | Path) -> list[dict]:
     # read_only here is FAST because we pull each sheet's grid once with
     # iter_rows(values_only=True) (sequential) and then index in memory — random
     # ws.cell() access in read_only mode would be pathologically slow.
-    wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
+    wb = safe_load_workbook(file_path, data_only=True, read_only=True)
     tables: list[dict] = []
 
     for sheet in wb.sheetnames:
