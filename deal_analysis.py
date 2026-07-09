@@ -542,6 +542,22 @@ def _deal_phasing(noi_t: dict | None, capex_t: dict | None, hold: dict | None,
     return {"kind": "none"}
 
 
+def _is_hospitality(prop: dict | None) -> bool:
+    """True only for a hotel / hospitality asset — the only property type where
+    ADR and RevPAR are the operating rate metrics. Reads property_id's classifier:
+    a type of hotel/hospitality/resort/lodging, OR a size counted in keys/rooms.
+    A multifamily (counted in units) that happens to carry an ADR/RevPAR row for a
+    short-term-rental SUB-component is NOT hospitality at the deal level — its
+    thesis lever is rent, not ADR — so it must return False here."""
+    if not prop:
+        return False
+    t = (prop.get("type") or {}).get("value")
+    if isinstance(t, str) and re.search(r"hotel|hospitality|resort|lodging", t, re.I):
+        return True
+    unit = ((prop.get("size") or {}).get("value") or {})
+    return isinstance(unit, dict) and unit.get("unit") in ("keys", "rooms")
+
+
 def _dscr_health(noi_t: dict | None, ds_t: dict | None) -> dict | None:
     """Trailing-12-month DSCR (NOI ÷ debt service) + a post-stabilization coverage
     flag. None when the model carries no debt-service flow (UI says "not available
@@ -643,12 +659,24 @@ def build_analysis(file_path: str | Path, dt: dict | None = None) -> dict[str, A
         traj = dict(traj)
         traj["occupancy"] = _occupancy_bookends(occ_sel, traj.get("noi"))
 
+    # Property identity (Tier-3, best-effort) — computed once here and reused by
+    # the interpretation layer. Its type/unit gates the hospitality-only ADR read.
+    try:
+        from property_id import property_identity
+        property_info = property_identity(file_path)
+    except Exception:
+        property_info = None
+    hospitality = _is_hospitality(property_info)
+
     # ADR / RevPAR — hotel rate LEVEL series, the same treatment as occupancy
-    # (never summed). Only fires for hospitality deals; silently absent elsewhere.
+    # (never summed). HOSPITALITY ONLY: ADR/RevPAR are hotel metrics, so gate on
+    # the property being a hotel. A multifamily can carry an ADR/RevPAR row for a
+    # short-term-rental sub-component (e.g. a "Mint House" block); surfacing that
+    # as the DEAL-level rate lever mislabels the whole deal, so skip it here.
     try:
         from cashflow_rollup import rate_level_candidates
-        adr_sel = _select_rate_series(rate_level_candidates(_ru, "adr"), traj.get("noi")) if _ru else None
-        revpar_sel = _select_rate_series(rate_level_candidates(_ru, "revpar"), traj.get("noi")) if _ru else None
+        adr_sel = _select_rate_series(rate_level_candidates(_ru, "adr"), traj.get("noi")) if (_ru and hospitality) else None
+        revpar_sel = _select_rate_series(rate_level_candidates(_ru, "revpar"), traj.get("noi")) if (_ru and hospitality) else None
     except Exception:
         adr_sel = revpar_sel = None
     if adr_sel:
@@ -905,7 +933,8 @@ def build_analysis(file_path: str | Path, dt: dict | None = None) -> dict[str, A
     md = "### Deal Analysis — grounded in the cash-flow model\n\n" + \
         "\n\n".join(sections[k] for k in order if k in sections)
     return {"ok": True, "md": md, "sections": sections, "dt": dt,
-            "traj": traj, "components": components, "dscr_health": dscr_health}
+            "traj": traj, "components": components, "dscr_health": dscr_health,
+            "property": property_info}
 
 
 if __name__ == "__main__":

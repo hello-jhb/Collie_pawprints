@@ -146,6 +146,11 @@ def st_regis_regression() -> None:
     if not fs.get("ok"):
         return
 
+    # Hospitality gate lets ADR through for a hotel (the opposite of the 1425 MF case).
+    prop_type = ((fs["deal"].get("property") or {}).get("type") or {}).get("value")
+    check(prop_type == "Hotel", f"property type detected as Hotel (got {prop_type})")
+    check(fs["operating"].get("adr") is not None, "ADR surfaced for a hotel")
+
     a = fs["deal"]["archetype"]
     check(a["label"] == "value-add / repositioning",
           f"archetype = value-add / repositioning (got {a['label']})")
@@ -191,6 +196,34 @@ def guard_1425_not_over_fired() -> None:
           f"phasing kind = none for a non-phased deal (got {ph and ph.get('kind')})")
     check(not any(c["id"] == "phasing" for c in fs["claims"]),
           "no phasing claim emitted when kind = none")
+
+
+def guard_multifamily_no_adr() -> None:
+    # 1425 is a MULTIFAMILY that carries an ADR/RevPAR row for a short-term-rental
+    # (Mint House) sub-component. ADR is a hotel metric — it must NOT surface as
+    # the deal-level lever for a multifamily, and the thesis must not read rate-led.
+    print("\n— 1425 hospitality gate: ADR/RevPAR suppressed for a multifamily")
+    fs = assemble_fact_sheet(_1425)
+    check(fs.get("ok"), "fact sheet built without error")
+    if not fs.get("ok"):
+        return
+    prop_type = ((fs["deal"].get("property") or {}).get("type") or {}).get("value")
+    check(prop_type == "Multifamily", f"property type detected as Multifamily (got {prop_type})")
+    op = fs["operating"]
+    check(op.get("adr") is None, "ADR not surfaced for a multifamily")
+    check(op.get("revpar") is None, "RevPAR not surfaced for a multifamily")
+    check(op.get("revpar_bridge") is None, "no RevPAR bridge for a multifamily")
+    check(fs["deal"]["archetype"]["signals"].get("revpar_lever") is None,
+          "no rate lever inferred for a multifamily")
+    thesis = next((c for c in fs["claims"] if c["id"] == "thesis"), None)
+    check(thesis is not None and "ADR" not in thesis["headline"],
+          "thesis headline does not cite ADR for a multifamily")
+    check(thesis is not None and "rate (ADR)" not in thesis["why_matters"],
+          "thesis does not claim a rate (ADR) lever for a multifamily")
+    # Occupancy is flat (70% → 70%) here — the thesis must not falsely credit
+    # occupancy as the lever when it didn't move.
+    check(thesis is not None and "occupancy is the lever" not in thesis["why_matters"],
+          "flat occupancy is not falsely named the lever")
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +334,7 @@ def main() -> int:
         print("\n— St Regis structural regression: SKIPPED (file not local)")
     if _1425.exists():
         guard_1425_not_over_fired()
+        guard_multifamily_no_adr()
     else:
         print("\n— 1425 non-reposition guard: SKIPPED (file not local)")
     print(f"\n{'ALL PASS' if _fail == 0 else f'{_fail} FAILURE(S)'}")

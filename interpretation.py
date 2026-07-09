@@ -321,8 +321,14 @@ def _lever_phrase_and_guardrail(lever: str | None, gi_occ, stab_occ, has_adr: bo
         return ", and occupancy is the lever driving it", guard
     if lever == "rate + occupancy":
         return ", driven by both rate (ADR) and occupancy", ""
+    # No rate series to test against (non-hospitality): occupancy is the
+    # conventional value-add lever — but only assert it when occupancy actually
+    # MOVED. A flat occupancy with a rising NOI ramp is a rent-growth story we
+    # can't cleanly measure here; don't misattribute the ramp to occupancy.
     if lever is None and isinstance(gi_occ, (int, float)) and isinstance(stab_occ, (int, float)):
-        return ", and occupancy is the lever driving it", ""
+        if abs(stab_occ - gi_occ) >= 0.03:
+            return ", and occupancy is the lever driving it", ""
+        return "", ""
     return "", ""
 
 
@@ -637,12 +643,16 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
     # post-stab hold), computed deterministically off the NOI + capex series.
     # "none" (or absent) for a stabilized deal — the phasing claim then omits.
     deal["phasing"] = traj.get("phasing")
-    # Tier-3 property identity for the Summary header (best-effort, labels misses).
-    try:
-        from property_id import property_identity
-        deal["property"] = property_identity(file_path)
-    except Exception:
-        deal["property"] = None
+    # Tier-3 property identity for the Summary header — reuse the one build_analysis
+    # already computed (it needs the type to gate the hospitality-only ADR read);
+    # only recompute if this fact sheet was assembled without a fresh analysis.
+    deal["property"] = analysis.get("property")
+    if deal["property"] is None:
+        try:
+            from property_id import property_identity
+            deal["property"] = property_identity(file_path)
+        except Exception:
+            deal["property"] = None
 
     operating = {c: _traj_pts(traj.get(c)) for c in ("noi", "revenue", "opex", "capex")}
     # Occupancy is a LEVEL series (a %), not a flow — carried as going-in/stabilized
