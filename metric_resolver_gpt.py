@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scenarios._llm import client, MODEL_FAST, llm_available
+from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from re_knowledge import knowledge_block, IDENTITY_RELATIONSHIPS
 
 log = logging.getLogger("fb.resolver_gpt")
@@ -381,7 +381,7 @@ def _gpt_pick(metric: dict, candidates: list[dict], context_by_idx: dict[int, di
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _system_with_rules()},
                 {"role": "user",   "content": user_msg},
@@ -569,7 +569,7 @@ def run_comprehension_review(bounded_metrics: dict) -> dict:
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": COMPREHENSION_SYSTEM},
                 {"role": "user",   "content": user_msg},

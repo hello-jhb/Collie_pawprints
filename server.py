@@ -247,9 +247,14 @@ async def chat(session_id: str = Form(...), message: str = Form(...)):
 
     for _ in range(6):
         try:
+            # NOTE: gpt-5.4 rejects `reasoning_effort` together with `tools` on
+            # /v1/chat/completions ("Function tools with reasoning_effort are not
+            # supported … use /v1/responses instead"). So the tool-using chat loop
+            # omits it and runs at the model's default effort. (Restoring effort
+            # control here means migrating this loop to the Responses API.)
             resp = client.chat.completions.create(
                 model=MODEL, messages=hist, tools=_CHAT_TOOLS,
-                tool_choice="auto", temperature=0.2)
+                tool_choice="auto")
         except Exception as e:                             # pragma: no cover - defensive
             log.warning("[%s] chat FAILED (%s: %s)", session_id, type(e).__name__, e)
             return {"reply": f"Chat failed: {type(e).__name__}: {e}"}

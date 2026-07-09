@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scenarios._llm import client, MODEL, llm_available
+from scenarios._llm import client, MODEL, REASONING_EFFORT, llm_available
 from workbook_orientation import analyst_reading_stack
 
 log = logging.getLogger("fb.model_brief")
@@ -188,7 +188,7 @@ def build_model_brief(file_path: str | Path, use_cache: bool = True) -> dict[str
     try:
         resp = client.chat.completions.create(
             model=MODEL,
-            temperature=0.1,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_msg},
@@ -320,7 +320,7 @@ def finalize_brief(brief: dict, scored: dict, canonical: list[dict] | None = Non
     )
     try:
         resp = client.chat.completions.create(
-            model=MODEL, temperature=0.1,
+            model=MODEL, reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _FINALIZE_SYSTEM},
                 {"role": "user", "content": user_msg},

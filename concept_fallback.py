@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scenarios._llm import client, MODEL_FAST, llm_available
+from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from workbook_map import _CONCEPT_VOCAB, _BLOCK_FOR_CONCEPT, _RATE, _MULTIPLE, _MONEY
 from flexible_extractor import sorted_sheets_by_priority
 from metric_resolver import parse_numeric_value
@@ -153,7 +153,7 @@ def _one_concept_gpt_call(concept: str, sheet_name: str, sheet_text: str) -> dic
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": user_msg},

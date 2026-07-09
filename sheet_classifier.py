@@ -20,7 +20,7 @@ import logging
 import sys
 from pathlib import Path
 
-from scenarios._llm import client, MODEL_FAST, llm_available
+from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from re_knowledge import SHEET_ROLE_VOCAB, ROLE_TO_TIER
 from knowledge_store import build_runtime_knowledge_block
 
@@ -115,7 +115,7 @@ def classify_sheets(file_path: Path) -> dict[str, dict]:
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user",   "content": user_msg},

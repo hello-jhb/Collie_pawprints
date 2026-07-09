@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scenarios._llm import client, MODEL_FAST, llm_available
+from scenarios._llm import client, MODEL_FAST, REASONING_EFFORT, llm_available
 from flexible_extractor import sorted_sheets_by_priority
 
 log = logging.getLogger("fb.fallback")
@@ -158,7 +158,7 @@ def _one_metric_gpt_call(metric: dict, sheet_name: str, sheet_text: str) -> dict
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _system_with_rules()},
                 {"role": "user",   "content": user_msg},

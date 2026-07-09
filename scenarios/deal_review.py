@@ -424,7 +424,7 @@ your system prompt. Prefer human-verified facts. Be specific. Cite cell
 references where facts are used. NEVER cite SUSPICIOUS or MISSING values as fact.
 """
 
-    narrative = complete(SYSTEM_PROMPT, user_prompt, temperature=0.2)
+    narrative = complete(SYSTEM_PROMPT, user_prompt)
 
     # Memorialize the acquisition (write-once)
     _memorialize_acquisition(s, narrative, filtered, underwriting)

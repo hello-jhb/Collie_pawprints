@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from metric_resolver import parse_numeric_value
-from scenarios._llm import client, MODEL, llm_available
+from scenarios._llm import client, MODEL, REASONING_EFFORT, llm_available
 
 log = logging.getLogger("fb.trust")
 if not log.handlers:
@@ -268,7 +268,7 @@ def _challenge(facts: list[dict], cells_block: str) -> dict[int, dict]:
     try:
         resp = client.chat.completions.create(
             model=MODEL,
-            temperature=0.0,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _CHALLENGE_SYSTEM},
                 {"role": "user", "content": user_msg},

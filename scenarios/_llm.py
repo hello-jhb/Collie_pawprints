@@ -61,22 +61,31 @@ class _ClientProxy:
 
 client = _ClientProxy()
 
-MODEL       = "gpt-4o"
-MODEL_FAST  = "gpt-4o-mini"   # used for ingest-time insight pass (cost-sensitive)
+MODEL       = "gpt-5.4"
+MODEL_FAST  = "gpt-5.4-mini"   # used for ingest-time insight pass (cost-sensitive)
+
+# GPT-5-family reasoning models reject the `temperature` param over Chat
+# Completions (only the default of 1 is accepted) — `reasoning_effort` is the
+# replacement tuning knob. "none" fits these calls: they organize/narrate
+# already-computed facts or do a single-cell lookup, not multi-step reasoning,
+# so there's no quality reason to pay for deeper (and much costlier —
+# reasoning tokens bill at the output rate) effort. ("minimal" is not a valid
+# value for this model family — only none/low/medium/high/xhigh are accepted.)
+REASONING_EFFORT = "none"
 
 
 def llm_available() -> bool:
     return get_client() is not None
 
 
-def complete(system: str, user: str, temperature: float = 0.2) -> str:
+def complete(system: str, user: str, reasoning_effort: str = REASONING_EFFORT) -> str:
     """Single chat completion. Returns the assistant text."""
     live_client = get_client()
     if live_client is None:
         return "[LLM unavailable — set OPENAI_API_KEY environment variable]"
     response = live_client.chat.completions.create(
         model=MODEL,
-        temperature=temperature,
+        reasoning_effort=reasoning_effort,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -219,7 +228,7 @@ def run_raw_insight_pass(
     try:
         response = client.chat.completions.create(
             model=MODEL_FAST,
-            temperature=0.1,
+            reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _INSIGHT_SYSTEM},
                 {"role": "user",   "content": user_msg},

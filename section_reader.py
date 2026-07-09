@@ -34,7 +34,7 @@ from typing import Any
 import openpyxl
 import openpyxl.utils as xlutils
 
-from scenarios._llm import MODEL_FAST, client, llm_available
+from scenarios._llm import MODEL_FAST, REASONING_EFFORT, client, llm_available
 from re_knowledge import knowledge_block
 
 log = logging.getLogger("fb.section_reader")
@@ -74,7 +74,7 @@ def _chat_completion_with_retry(messages: list[dict[str, str]], section: str):
         try:
             return client.chat.completions.create(
                 model=SECTION_MODEL,
-                temperature=0.0,
+                reasoning_effort=REASONING_EFFORT,
                 messages=messages,
             )
         except Exception as exc:

@@ -41,7 +41,7 @@ import sys
 from typing import Any
 
 from metric_resolver import parse_numeric_value
-from scenarios._llm import client, MODEL, llm_available
+from scenarios._llm import client, MODEL, REASONING_EFFORT, llm_available
 
 log = logging.getLogger("fb.intel")
 if not log.handlers:
@@ -447,7 +447,7 @@ def interpret(analytics: dict, facts: list[dict], identity: dict | None,
                 + _facts_block(facts) + _guardrail_block(guardrails))
     try:
         resp = client.chat.completions.create(
-            model=MODEL, temperature=0.2,
+            model=MODEL, reasoning_effort=REASONING_EFFORT,
             messages=[
                 {"role": "system", "content": _INTERPRET_SYSTEM},
                 {"role": "user", "content": user_msg},
