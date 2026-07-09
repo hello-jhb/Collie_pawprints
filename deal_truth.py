@@ -857,6 +857,20 @@ def _derive_stack_from_spine(oracle: dict, canonical: dict) -> float:
             sc = _nearest_pow10((cost - eq) / dv)
             if sc in (1e-3, 1e3, 1e6):
                 canonical["debt"] = {**di, "value": float(di["value"]) * sc}
+
+    # Invariant: total project cost can't be less than total debt — you can't borrow
+    # more than the project costs. A vocab-sourced cost drawn from a PHASED sources/
+    # uses table (e.g. 'Total Uses — At Close') undercounts the full project; when it
+    # falls below debt, the grounded total is debt + equity (both full-$ here). Only
+    # override a non-recomputed cost, so a stream-derived total_cost is never touched.
+    ci = canonical.get("total_cost")
+    cost, dv, eqv = _val_of(canonical, "total_cost"), _val_of(canonical, "debt"), _val_of(canonical, "equity")
+    if (ci and ci.get("method") != "recomputed" and dv and eqv
+            and cost is not None and cost < dv * 0.999):
+        canonical["total_cost"] = {
+            "concept": "total_cost", "value": dv + eqv,
+            "source": "debt + equity (phased sources/uses undercounted total cost)",
+            "method": "derived", "validated": False, "conflict": False, "cf_validated": False}
     return 1.0
 
 

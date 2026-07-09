@@ -257,6 +257,37 @@ def _pick_type(cells):
     return _field(None, None, "not_found"), None
 
 
+def _column_total(grid, r, c, lo, hi):
+    """When a size label is a COLUMN HEADER atop a table (e.g. '# of Units' over a
+    unit-mix grid), the property total is that column's 'Total' row — NOT the first
+    data cell directly below it. Walk column `c` down from the header; if a row whose
+    left-label reads 'Total…' carries an in-range number, that's the answer. Returns
+    the total or None (None → caller falls back to the adjacent-cell heuristic, so a
+    lone 'Units: 8' statement is unaffected)."""
+    # Must look like a header: the cell immediately below is numeric.
+    below = grid[r + 1][c] if (r + 1 < len(grid) and c < len(grid[r + 1])) else None
+    if _num(below) is None:
+        return None
+    seen = 0
+    for rr in range(r + 1, min(r + 60, len(grid))):
+        row = grid[rr]
+        n = _num(row[c]) if c < len(row) else None
+        if n is None:
+            if seen:      # end of the contiguous numeric column
+                break
+            continue
+        # Left-label for this row (nearest text scanning left).
+        label = ""
+        for cc in range(c - 1, max(-1, c - 9) - 1, -1):
+            if cc < len(row) and isinstance(row[cc], str) and row[cc].strip():
+                label = row[cc]
+                break
+        if seen >= 1 and re.search(r"\btotal\b", label, re.I) and lo <= n <= hi:
+            return round(n)
+        seen += 1
+    return None
+
+
 def _pick_size(cells, type_cls):
     from collections import Counter
     # Prefer the size kind matching the inferred class, else the strongest signal.
@@ -265,6 +296,14 @@ def _pick_size(cells, type_cls):
         vals, totals = [], []        # (value, source); totals = property-level labels
         for sheet, r, c, text, grid in cells:
             if not pat.search(text) or _OPERATING_COUNT.search(text) or _SIZE_NOISE.search(text):
+                continue
+            # A column-header count (unit-mix / key-count table) → take the column's
+            # 'Total' row, not the first data row directly under the header.
+            ct = _column_total(grid, r, c, lo, hi)
+            if ct is not None:
+                rec = (ct, f"{sheet}!R{r + 1}C{c + 1}")
+                vals.append(rec)
+                totals.append(rec)
                 continue
             for nb in _neighbors(grid, r, c):
                 n = _num(nb)

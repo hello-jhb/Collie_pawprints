@@ -133,6 +133,32 @@ def test_colorado_analyze_completes_and_never_hangs():
     assert resp.json().get("mode") in ("acquisition", "performance", "limited")
 
 
+@pytest.mark.skipif(not COLORADO.exists(), reason="425 Colorado fixture not present")
+def test_colorado_summary_facts_read_correctly():
+    """Extraction accuracy on the 425 Colorado summary sheet: the total unit count,
+    a total project cost that respects cost≥debt, and an exit that is the deal's own
+    (~$89M) rather than a $300M sales COMP."""
+    from wb_io import workbook_cache
+    from deal_truth import build_deal_truth
+    with workbook_cache():
+        dt = build_deal_truth(COLORADO)
+    can = dt["canonical"]
+
+    def val(k):
+        return float(can[k]["value"]) if k in can else None
+
+    from property_id import property_identity
+    size = property_identity(COLORADO)["size"]["value"]
+    assert size and size["amount"] == 144, f"units should be the 144 total, got {size}"
+
+    cost, debt = val("total_cost"), val("debt")
+    assert cost and debt and cost >= debt, f"total cost {cost} must be ≥ debt {debt}"
+    assert cost > 50e6, f"total cost should reflect the full project (~$59M), got {cost}"
+
+    sale = val("sale_price")
+    assert sale is None or sale < 150e6, f"exit must be the deal's own, not a $300M comp: {sale}"
+
+
 def _analyze(client, path: Path):
     with path.open("rb") as fh:
         return client.post(

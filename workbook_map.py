@@ -53,6 +53,15 @@ if not log.handlers:
 
 WORKBOOK_MAP_VERSION = "2026-06-15.1"
 
+# Comparables sheets (sales/rent comps, comp sets) describe OTHER properties — a
+# $300M sale on a comp tab is not THIS deal's exit. Never source deal-level facts
+# from them (mirrors property_id's identity discipline).
+_COMP_SHEET_RE = re.compile(r"\bcomp(s|\s*set)?\b|comparabl|rent\s*roll\s*comp", re.I)
+
+
+def _is_comp_sheet(name: str) -> bool:
+    return bool(_COMP_SHEET_RE.search(name or ""))
+
 # ---------------------------------------------------------------------------
 # Concept vocabulary — maps a free-form label to the economic role it plays.
 # Order matters: MORE SPECIFIC variants first so substrings don't mis-bind
@@ -494,6 +503,8 @@ def build_workbook_map(file_path: str | Path, use_cache: bool = True) -> dict[st
         candidates.setdefault(fact["concept"], []).append(entry)
 
     for sheet, grid in grids.items():
+        if _is_comp_sheet(sheet):     # comparables describe OTHER properties, not this deal
+            continue
         role = (osheets.get(sheet, {}) or {}).get("role", "other")
         # Static facts from summary / inputs / returns / support tabs (the places
         # headline numbers are displayed). Model tabs are covered by time series.
