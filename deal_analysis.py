@@ -17,6 +17,7 @@ Public:
 """
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -589,12 +590,19 @@ def _dscr_health(noi_t: dict | None, ds_t: dict | None) -> dict | None:
         return None
     # Units sanity: NOI is full-$, debt service is native — a constant off-by-1000
     # shows as an off-scale DSCR; rescale the whole series into range (no per-file tuning).
+    # Drive the scale search off the MAGNITUDE: a development deal has negative-NOI
+    # construction months, so the raw median DSCR can be ≤0 — feeding that straight
+    # into `while med*k < 0.3` spins forever (k→inf, condition stays true). Use
+    # abs(), require a finite positive magnitude, and hard-bound k so this can never
+    # hang regardless of the input.
     med = statistics.median([d for _, d, _ in series])
+    mag = abs(med)
     k = 1.0
-    while med * k < 0.3:
-        k *= 1000.0
-    while med * k > 30:
-        k /= 1000.0
+    if math.isfinite(mag) and mag > 0:
+        while mag * k < 0.3 and k <= 1e6:
+            k *= 1000.0
+        while mag * k > 30 and k >= 1e-6:
+            k /= 1000.0
     series = [(m, d * k, tn) for m, d, tn in series]
 
     stab_m = next((m for m, _, tn in series if tn >= 0.95 * stab), None)

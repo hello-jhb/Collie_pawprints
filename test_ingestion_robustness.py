@@ -15,7 +15,21 @@ from pathlib import Path
 
 import pytest
 
-FIXTURE = Path(__file__).parent / "tests" / "fixtures" / "Westview Austin - Model_02.19.2022.xlsx"
+_FIXDIR = Path(__file__).parent / "tests" / "fixtures"
+FIXTURE = _FIXDIR / "Westview Austin - Model_02.19.2022.xlsx"
+COLORADO = _FIXDIR / "425 Colorado Proforma_03.08.2022_Adept.xlsx"
+
+
+def _run_bounded(fn, timeout: float):
+    """Run fn() on a thread; raise AssertionError if it doesn't finish in time.
+    So a regression that reintroduces a hang FAILS loudly instead of wedging CI."""
+    import threading
+    box: dict = {}
+    t = threading.Thread(target=lambda: box.__setitem__("r", fn()), daemon=True)
+    t.start()
+    t.join(timeout)
+    assert not t.is_alive(), f"call did not complete within {timeout}s (hang regression)"
+    return box.get("r")
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +104,33 @@ def test_limited_read_reports_identity_and_inventory():
     assert r["fact_sheet"]["ok"] is False
     assert isinstance(r["fact_sheet"]["sheets"], list) and r["fact_sheet"]["sheets"]
     assert "note here" in r["read_md"]
+
+
+def test_dscr_health_does_not_hang_on_negative_noi():
+    """A development deal has negative-NOI construction months, so the trailing-12
+    median DSCR can be ≤0. The unit-rescale search must NOT spin on that (the bug
+    that hung 425 Colorado forever → severed request → HTTP 429 on the retry)."""
+    from deal_analysis import _dscr_health
+    months = [f"2022-{m:02d}" for m in range(1, 13)] + [f"2023-{m:02d}" for m in range(1, 13)]
+    noi = [(m, -50_000.0) for m in months[:12]] + [(m, 200_000.0) for m in months[12:]]
+    ds = [(m, 100_000.0) for m in months]
+    noi_t = {"by_period": noi, "stabilized": 200_000.0}
+    ds_t = {"by_period": ds, "source": "test"}
+    res = _run_bounded(lambda: _dscr_health(noi_t, ds_t), timeout=10.0)
+    assert res is None or res.get("available") is True
+
+
+@pytest.mark.skipif(not COLORADO.exists(), reason="425 Colorado fixture not present")
+def test_colorado_analyze_completes_and_never_hangs():
+    """Full regression for the reported file: /api/analyze on 425 Colorado returns
+    200 (full or limited) with headroom — never a hang/severed request/429."""
+    from fastapi.testclient import TestClient
+    import server
+    client = TestClient(server.app)
+    resp = _run_bounded(lambda: _analyze(client, COLORADO), timeout=90.0)
+    assert resp is not None and resp.status_code == 200, \
+        f"got {getattr(resp, 'status_code', 'HANG')}"
+    assert resp.json().get("mode") in ("acquisition", "performance", "limited")
 
 
 def _analyze(client, path: Path):
