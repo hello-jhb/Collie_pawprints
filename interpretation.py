@@ -140,10 +140,28 @@ def _classify_archetype(dt: dict, traj: dict) -> dict[str, Any]:
     if reposition:
         label, conf = "value-add / repositioning", "high"
 
+    # deal_truth's business-plan read is the AUTHORITATIVE strategy signal. It
+    # detects a construction run (a stretch of leading outflows before income in
+    # the unlevered stream) that the NOI operating series alone misses when the
+    # model's cash-flow tab begins at DELIVERY rather than at land/close — exactly
+    # the case where the occupancy/capex branches above misread a ground-up as a
+    # value-add (going-in NOI is a forward-average across lease-up, and a flat
+    # assumed occupancy trips the <0.85 value-add gate). A development is build +
+    # lease-up from ~zero: no in-place yield, no rent-jump value-add. So when
+    # deal_truth says development — and it isn't the more-specific reposition of an
+    # already-operating asset — that governs the archetype.
     deal_type = (dt.get("deal_type") or "").lower()
-    strategy_conflict = (deal_type == "development" and label in ("core", "core-plus"))
+    if deal_type == "development" and not reposition:
+        label, conf = "opportunistic / development", "high"
+
+    # Conflict = deal_truth and the trajectory-derived label still disagree on the
+    # strategy family (e.g. a reposition V-trough fired on a deal deal_truth read
+    # as development). The override above resolves the common ground-up case, so
+    # this now only trips on a genuine cross-family disagreement.
+    _DEV_FAMILY = {"opportunistic / development", "value-add / repositioning"}
+    strategy_conflict = (deal_type == "development" and label not in _DEV_FAMILY)
     if strategy_conflict:
-        conf = "medium"          # behaves flat, but underwritten as development — flag it
+        conf = "medium"          # underwritten as development but reads otherwise — flag it
 
     bridge = traj.get("revpar_bridge") or {}
 
@@ -384,20 +402,37 @@ def _acquisition_claims(fs: dict) -> list[dict]:
     lever_phrase, lever_guard = _lever_phrase_and_guardrail(
         sig.get("revpar_lever"), gi_occ, stab_occ, bool(adr_str))
     display_label = _LABEL_DISPLAY.get(a["label"], a["label"])
+    if a["label"] == "opportunistic / development":
+        # Ground-up development has no in-place NOI: the "going-in" figure is a
+        # forward-average across the lease-up ramp, not an in-place yield, and the
+        # occupancy bookend is typically a flat assumed rate, not the absorption
+        # curve. A going-in→exit "+X%" headline would manufacture a value-add
+        # rent-jump story. Present it as build → lease-up to a stabilized NOI.
+        headline = f"Development / lease-up — building to a stabilized NOI of {m(nb['exit'])}"
+        why_matters = ("This is a ground-up development: there is no in-place NOI to grow — the value is "
+                       "created by delivering the asset and leasing it to stabilization. Judge it on "
+                       "delivery timing and absorption pace, not a going-in yield or an NOI growth rate.")
+        guardrail = ("Read this as a DEVELOPMENT (lens above): early and in-place NOI is expected near zero "
+                     "and is NOT a miss. Do not frame it as a value-add rent jump, cite a going-in→exit NOI "
+                     "percentage as the thesis, or lean on the going-in occupancy figure.")
+    else:
+        headline = (f"{display_label.title()} — NOI {m(nb['going_in'])} → {m(nb['exit'])}"
+                    + (f" ({growth*100:+.0f}%)" if isinstance(growth, (int, float)) else "")
+                    + occ_str + adr_str)
+        why_matters = (f"Going-in NOI is {sig.get('going_in_noi_pct_of_stabilized', '?')} of "
+                       "stabilized — the value to be created is the ramp" + lever_phrase + ".")
+        guardrail = (f"Read this as a {display_label} deal (lens above)."
+                     + (" Note: underwritten as development but hold-period NOI is flat — "
+                        "flag the strategy/behaviour mismatch." if a.get("strategy_conflict") else "")
+                     + lever_guard)
     claims.append({
         "id": "thesis", "direction": a["label"], "confidence": a["confidence"],
-        "headline": f"{display_label.title()} — NOI {m(nb['going_in'])} → {m(nb['exit'])}"
-                    + (f" ({growth*100:+.0f}%)" if isinstance(growth, (int, float)) else "")
-                    + occ_str + adr_str,
+        "headline": headline,
         "what_changed": "", "why": a["lens"],
-        "why_matters": (f"Going-in NOI is {sig.get('going_in_noi_pct_of_stabilized', '?')} of "
-                        "stabilized — the value to be created is the ramp" + lever_phrase + "."),
+        "why_matters": why_matters,
         "implication": (f"Underwritten exit {m(t['sale_price'])} at a {pct(t['exit_cap'])} cap."),
         "sources": ["archetype", "noi_bridge", "occupancy", "revpar_bridge"],
-        "guardrail": (f"Read this as a {display_label} deal (lens above)."
-                      + (" Note: underwritten as development but hold-period NOI is flat — "
-                         "flag the strategy/behaviour mismatch." if a.get("strategy_conflict") else "")
-                      + lever_guard)})
+        "guardrail": guardrail})
     # phasing — the explicit build/reno → reopen → lease-up → stabilization
     # timeline. Only for a development or repositioning; omitted for a stabilized
     # deal (kind "none"/absent). Complements, not duplicates, the coverage claim.
@@ -437,7 +472,31 @@ def _acquisition_claims(fs: dict) -> list[dict]:
     # lease-up absorption — label it accordingly so the risk narrative doesn't
     # misread a rooms-offline renovation as a demand problem.
     low_point_phase = "renovation disruption" if a["label"] == "value-add / repositioning" else "lease-up"
-    if dh and dh.get("available") and dh.get("healthy"):
+    if a["label"] == "opportunistic / development":
+        # A ground-up development has no in-place NOI to service debt through
+        # construction and lease-up, so "coverage not measurable" is EXPECTED, not
+        # the risk. The real structural risks are execution: finishing on time and
+        # budget, hitting absorption, and refinancing the construction loan into
+        # permanent debt at stabilization (often several takeouts).
+        dev_fin = (" Construction debt is floating and uncapped, so the takeout/refi is exposed to the "
+                   "rate path." if (floating and not capped)
+                   else " Construction debt is floating but rate-capped, bounding the takeout rate tail."
+                   if floating else "")
+        claims.append({
+            "id": "structural_risk", "direction": "execution", "confidence": "T1",
+            "headline": "Execution risk is delivery, lease-up, and construction-loan takeout — not in-place coverage",
+            "what_changed": "",
+            "why": "There is no in-place NOI to cover debt service during construction and lease-up; the risk "
+                   "is completing on time and on budget, hitting the absorption schedule, and refinancing the "
+                   "construction loan into permanent debt at stabilization.",
+            "why_matters": "Construction delay, slow lease-up, or a takeout at a higher rate each erode returns "
+                           "before the asset ever stabilizes." + dev_fin,
+            "implication": "", "sources": ["archetype", "rate_type"],
+            "guardrail": "This is a DEVELOPMENT: frame structural risk as construction/delivery delay, lease-up "
+                         "absorption, and construction-loan takeout/refi. Do NOT frame it as DSCR visibility or "
+                         "floating-rate coverage — in-place coverage is not measurable and is not the headline "
+                         "risk here."})
+    elif dh and dh.get("available") and dh.get("healthy"):
         claims.append({
             "id": "structural_risk", "direction": "coverage", "confidence": "T1",
             "headline": f"Debt coverage holds — DSCR ≥1.2× through stabilization"
@@ -739,9 +798,42 @@ def assemble_fact_sheet(file_path: str | Path, dt: dict | None = None,
 # ---------------------------------------------------------------------------
 # Human-readable dump (for review — not the GPT prompt).
 # ---------------------------------------------------------------------------
+def _render_gpt_read(fs: dict) -> str:
+    """Compact render of a Tier-2 GPT summary read for the chat system prompt. Every
+    line is flagged unvalidated so the agent never presents these as verified facts."""
+    def M(v):
+        return (f"${v/1e6:.1f}M" if isinstance(v, (int, float)) and abs(v) >= 1e6 else
+                (f"${v:,.0f}" if isinstance(v, (int, float)) else "—"))
+
+    def P(v):
+        return f"{v*100:.1f}%" if isinstance(v, (int, float)) else "—"
+
+    d = fs.get("deal", {})
+    t = d.get("targets", {})
+    op = (fs.get("operating") or {}).get("noi", {})
+    L = ["FACT SHEET · mode=gpt_read · NOT IRR-VALIDATED",
+         "(No cash-flow engine could be reproduced — these are the summary tab's stated "
+         "figures, GPT-read, NOT independently verified. Say so if you quote them, and "
+         "prefer reading the workbook directly for anything precise.)", ""]
+    prop = d.get("property")
+    if prop:
+        from property_id import identity_line
+        L.append(f"PROPERTY: {identity_line(prop)}")
+    strat = d.get("strategy", {})
+    L.append(f"STRATEGY: {strat.get('deal_type')} · hold "
+             f"{(strat.get('hold') or {}).get('months')} mo · {strat.get('financing')}")
+    L.append(f"TARGETS: acq {M(t.get('purchase_price'))} · cost {M(t.get('total_cost'))} · "
+             f"debt {M(t.get('debt'))} · exit {M(t.get('sale_price'))} @ {P(t.get('exit_cap'))} cap")
+    L.append(f"  levered IRR {P(t.get('levered_irr'))} · EM {t.get('levered_em') or '—'} · "
+             f"NOI {M(op.get('going_in'))} -> {M(op.get('exit'))}")
+    return "\n".join(L)
+
+
 def render_fact_sheet(fs: dict) -> str:
     if not fs.get("ok"):
         return f"(fact sheet unavailable: {fs.get('reason')})"
+    if fs.get("mode") == "gpt_read":
+        return _render_gpt_read(fs)
 
     def M(v):
         return f"${v/1e6:.1f}M" if isinstance(v, (int, float)) and abs(v) >= 1e6 else (
@@ -844,19 +936,25 @@ HARD RULES (a violation makes the read worthless):
    lever — follow them.
 6. Frame risk as COVERAGE, not rate type. Do NOT lead with "floating-rate risk": floating debt is
    usually capped, so the real question is whether NOI sustains ≥1.2× DSCR (use the DSCR Health claim).
-   Only flag the rate when coverage is actually at risk or unmeasurable.
+   Only flag the rate when coverage is actually at risk or unmeasurable. EXCEPTION — for a DEVELOPMENT,
+   coverage is not the frame at all: there is no in-place NOI to cover debt, so "coverage not measurable"
+   is expected, not a risk. Lead with construction/delivery delay, lease-up absorption, and
+   construction-loan takeout/refi, exactly as the structural_risk finding states.
 7. For acquisitions keep risk GENERIC to the archetype (market/demand vs hold for core; lease-up
-   execution for value-add; renovation timing/cost and rate hold-up for a repositioning; delivery/
-   absorption for development). For performance mode, be SPECIFIC: surface operating flags (bad
-   debt, unbudgeted R&M, insurance) as recurring risk.
+   execution for value-add; renovation timing/cost and rate hold-up for a repositioning; delivery,
+   lease-up absorption, and construction-loan takeout for development). For performance mode, be
+   SPECIFIC: surface operating flags (bad debt, unbudgeted R&M, insurance) as recurring risk.
 7b. When a PHASING claim is present, you MAY open the thesis finding with its timeline — one clause
    naming the build/renovation period and stabilization — then the lever and the risk. State dates
    and durations EXACTLY as the phasing claim carries them; never invent, round, or interpolate a
    date the fact sheet doesn't show. A boundary marked "not determinable from the model" must be
    left as unknown, not guessed.
 8. Write investment prose, not a metric list. Tight. An analyst's voice, not a dashboard.
-9. Areas for Review are POINTERS to investigate, not prescribed actions — phrase them as
-   things worth investigating further, proportional to the issue, never as directives.
+9. Areas for Review are POINTERS to investigate, not prescribed actions. Phrase each as a direct,
+   specific pointer that names the thing to check and why it matters — e.g. "review whether the lease-up
+   and NOI ramp are realistic given the absorption schedule". Do NOT use filler openers like "worth
+   investigating further", "it may be prudent to", or "consideration should be given to"; go straight to
+   what to check.
 10. If mode is "acquisition" there are no actuals — do NOT discuss "what changed" or performance.
 11. Respect DATA CONFIDENCE. A component marked T2-unfooted is a single line item, not a
     footed total — hedge it ("based on a single line, not a footed total") rather than stating
@@ -866,14 +964,21 @@ HARD RULES (a violation makes the read worthless):
     Go straight to what changed and why it matters; the facts card already did the orienting.
     Every number in the facts card is already visible to the reader; do not spend a bullet
     re-stating one without adding why it matters.
+13. Write as an asset manager who simply KNOWS these numbers. NEVER expose the internal machinery to
+    the reader: do not use the words "guardrail(s)", "fact sheet", "claim(s)", "trust tier", or
+    "confidence tier", and never explain which cell, row, or tab a figure comes from or why one figure
+    governs another. State the finding, not its plumbing.
 
 OUTPUT — exactly these two sections, markdown headers:
 ## Key Findings
    EXACTLY 3 bullets, each an evidence-backed observation drawn from the Claims — what happened
    AND why it matters, not just a restated number. Lead with the most important.
 ## Areas for Review
-   1–2 items that most affect future performance or risk (coverage-framed, not rate-alarmist),
-   framed as pointers to investigate further — not as recommended actions.
+   1–2 items that most affect future performance or risk, each a direct, specific pointer (name what to
+   check and why it matters) — not filler, not recommended actions. Frame around the archetype's real
+   risk: delivery, lease-up, and construction-loan takeout for development; renovation timing and rate
+   hold-up for a repositioning; coverage for a levered stabilized deal. Do not default to coverage or
+   rate alarm when the archetype's real risk is elsewhere.
 """
 
 

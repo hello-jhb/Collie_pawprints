@@ -16,6 +16,7 @@ Design rules:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -1311,6 +1312,105 @@ def read_sheet(filename: str, sheet_name: str, max_rows: int = 80) -> dict[str, 
         }
     except Exception as e:
         return {"error": f"Failed to read sheet: {type(e).__name__}: {e}"}
+
+
+def read_row_series(filename: str, sheet_name: str, row: Any,
+                    max_cols: int = 240) -> dict[str, Any]:
+    """
+    Return ONE row as a full period-by-period time series — the tool for reasoning
+    about TIMING (e.g. the riskiest month, when DSCR dips, the lease-up ramp). Monthly
+    models run wide (60–130+ columns), which read_sheet truncates at 30; this returns
+    the whole row plus the nearest period/date HEADER row above it, so each value is
+    labelled with its period.
+
+    `row` may be a 1-based row number, or a label string (the first row whose leftmost
+    text cell contains it, case-insensitive, is used).
+    """
+    import openpyxl
+    file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        return {"error": f"File not found: {filename}"}
+    try:
+        wb = safe_load_workbook(file_path, data_only=True, read_only=True)
+        target = None
+        for name in wb.sheetnames:
+            if name.lower() == str(sheet_name).lower():
+                target = name; break
+        if target is None:
+            for name in wb.sheetnames:
+                if str(sheet_name).lower() in name.lower():
+                    target = name; break
+        if target is None:
+            return {"error": f"Sheet '{sheet_name}' not found", "available_sheets": wb.sheetnames}
+        ws = wb[target]
+        grid = [r for r in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 400),
+                                        max_col=min(ws.max_column or 1, max_cols), values_only=True)]
+        wb.close()
+        if not grid:
+            return {"error": "empty sheet"}
+
+        # Resolve the target row (1-based) from a number or a label match.
+        row_idx = None
+        label = None
+        if isinstance(row, int) or (isinstance(row, str) and str(row).isdigit()):
+            row_idx = int(row) - 1
+        else:
+            needle = str(row).strip().lower()
+            for i, r in enumerate(grid):
+                for v in r[:10]:
+                    if isinstance(v, str) and needle in v.lower():
+                        row_idx = i; label = v.strip(); break
+                if row_idx is not None:
+                    break
+        if row_idx is None or not (0 <= row_idx < len(grid)):
+            return {"error": f"row {row!r} not found on '{target}'"}
+        the_row = grid[row_idx]
+        if label is None:
+            label = next((v.strip() for v in the_row[:10] if isinstance(v, str) and v.strip()), None)
+
+        # Nearest header row above: the closest row that is genuinely a PERIOD axis —
+        # datetimes, month-year tokens (word-boundary, so 'Marketing' ≠ 'Mar'), or a
+        # 4-digit year. Requires several such cells so a stray label row doesn't win.
+        import datetime as _dt
+        _MON = re.compile(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|q[1-4]|"
+                          r"year|yr|month|period)\b", re.I)
+        _YR = re.compile(r"\b(19|20)\d{2}\b")
+
+        def _hdrness(r):
+            n = 0
+            for v in r:
+                if isinstance(v, _dt.datetime):
+                    n += 1
+                elif isinstance(v, str) and (_MON.search(v) or _YR.search(v)):
+                    n += 1
+            return n
+        # Scan ALL rows above (a wide monthly model carries one master date row, often
+        # near the top — far more than 25 rows above a CF row deep in the sheet).
+        header = None
+        best = 2                                   # require ≥3 period-ish cells to accept
+        for i in range(0, row_idx):
+            h = _hdrness(grid[i])
+            if h > best:
+                best, header = h, grid[i]
+
+        def _per(c):
+            if not header or c >= len(header) or header[c] is None:
+                return None
+            hv = header[c]
+            return hv.strftime("%Y-%m") if isinstance(hv, _dt.datetime) else str(hv)[:16]
+
+        # The series is the NUMERIC cells of the row (the period values), each tagged
+        # with its period header — the label/text columns are dropped.
+        series = []
+        for c, v in enumerate(the_row):
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                series.append({"col": openpyxl.utils.get_column_letter(c + 1),
+                               "period": _per(c), "value": v})
+        return {"filename": filename, "sheet": target, "row": row_idx + 1,
+                "label": label, "has_period_header": header is not None,
+                "points": series[:max_cols], "n_points": len(series)}
+    except Exception as e:
+        return {"error": f"Failed to read row series: {type(e).__name__}: {e}"}
 
 
 def search_file(filename: str, query: str, max_matches: int = 30) -> dict[str, Any]:

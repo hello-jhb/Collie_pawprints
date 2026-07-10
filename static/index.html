@@ -445,8 +445,21 @@ function renderDeal(d){
   const szS = sz?`${sz.value.amount.toLocaleString()} ${sz.value.unit}`:'<span class="na">size not found</span>';
   $('subid').innerHTML = prop ? `${tyS} · ${szS}` : '';
   const a=FS.deal.archetype; $('aBadge').textContent=a.label;
-  $('modeBadge').textContent=d.mode==='performance'?'performance read':'acquisition read';
+  const isGpt = d.mode==='gpt_read';
+  $('modeBadge').textContent = isGpt ? 'unvalidated · summary read'
+    : (d.mode==='performance'?'performance read':'acquisition read');
+  $('modeBadge').style.color = isGpt ? '#b45309' : '';
   renderSummary(FS);
+  // Tier-2: a clear, honest banner above the grid so GPT-read figures are never
+  // mistaken for IRR-validated ones.
+  if(isGpt && FS.banner){
+    const b=document.createElement('div');
+    b.style.cssText='margin:0 0 12px;padding:10px 12px;border-radius:8px;'+
+      'background:rgba(180,83,9,.10);border:1px solid rgba(180,83,9,.35);'+
+      'color:#b45309;font-size:12.5px;line-height:1.4';
+    b.textContent='⚠ '+FS.banner;
+    $('facts').insertBefore(b, $('facts').firstChild);
+  }
   $('memo').innerHTML=marked.parse(d.read_md||'');
   renderDetail(d, FS);
 }

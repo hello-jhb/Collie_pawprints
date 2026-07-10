@@ -39,6 +39,9 @@ app = FastAPI(title="Collie", version="0.1.0")
 MODEL_MAX_BYTES = 15 * 1024 * 1024      # underwriting workbooks: 15MB
 ACTUALS_MAX_BYTES = 5 * 1024 * 1024     # financial statements: 5MB each
 
+# Focused-analyst chat: a small per-session question budget, not an open chatbot.
+CHAT_QUESTION_CAP = int(os.getenv("CHAT_QUESTION_CAP", "3"))
+
 _STATIC = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_STATIC):
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -135,10 +138,12 @@ async def analyze(model: UploadFile = File(...),
     from deal_analysis import build_analysis
     from interpretation import assemble_fact_sheet, build_investment_read
 
-    def _store(payload: dict, *, read_md: str | None, fs: dict, source: str | None) -> dict:
+    def _store(payload: dict, *, read_md: str | None, fs: dict, source: str | None,
+               engine_sheet: str | None = None, phasing: dict | None = None) -> dict:
         _SESSIONS[sid] = {"model_path": str(model_path), "model_filename": model_filename,
                           "fact_sheet": fs, "read_md": read_md,
-                          "read_source": source, "history": None}
+                          "read_source": source, "history": None,
+                          "engine_sheet": engine_sheet, "phasing": phasing, "turns": 0}
         return payload
 
     # One request-scoped cache for every load below — the pipeline loads this file
@@ -155,11 +160,32 @@ async def analyze(model: UploadFile = File(...),
             return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
 
         if not dt.get("engine_found", True):
-            log.warning("[%s] analyze — no validated cash-flow engine: %s", sid, dt.get("reason"))
+            # Tier 2: the cash-flow oracle couldn't validate, but the summary tab may
+            # still carry the whole story (people rush the summary and skip the model).
+            # Try a GPT-read of the summary → full grid, labelled "not IRR-validated".
+            log.warning("[%s] analyze — no validated engine; attempting GPT summary read: %s",
+                        sid, dt.get("reason"))
+            try:
+                from tier2_read import build_gpt_read
+                gr = build_gpt_read(model_path, model_filename, sid, dt)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[%s] tier-2 GPT read failed (%s) — limited mode", sid, e)
+                gr = None
+            if gr and gr.get("fact_sheet", {}).get("ok"):
+                return _store(gr, read_md=gr["read_md"], fs=gr["fact_sheet"], source="gpt_read")
             r = _limited_read(model_path, model_filename, sid,
                               "We read your file but couldn't auto-validate a cash-flow engine "
                               "in it — here's what we can see; ask about any sheet.")
             return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
+
+        # GPT proposes, oracle disposes: audit the engine's headline facts against the
+        # summary sheet and correct a WEAK pick (never a validated one; a suggestion that
+        # fails an invariant like cost≥debt is rejected). Degrades to the engine's facts.
+        try:
+            from fact_review import review_headline_facts
+            dt["canonical"] = review_headline_facts(model_path, dt)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[%s] headline review skipped (%s)", sid, e)
 
         # Enrichment stages: any failure degrades to limited rather than severing.
         try:
@@ -186,7 +212,9 @@ async def analyze(model: UploadFile = File(...),
     payload = {"session_id": sid, "mode": fs.get("mode"),
                "read_md": read.get("md"), "detail_md": analysis.get("md"),
                "fact_sheet": fs}
-    return _store(payload, read_md=read.get("md"), fs=fs, source=read.get("source"))
+    return _store(payload, read_md=read.get("md"), fs=fs, source=read.get("source"),
+                  engine_sheet=dt.get("cashflow_engine"),
+                  phasing=(fs.get("deal", {}) or {}).get("phasing"))
 
 
 # Chat tools — the agent answers from the fact sheet first, REVISITS the workbook for
@@ -211,6 +239,18 @@ _CHAT_TOOLS = [
     {"type": "function", "function": {"name": "list_sheets",
         "description": "List the workbook's sheet names and sizes.",
         "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {"name": "read_row_series",
+        "description": "Return ONE row as a full period-by-period time series (with its "
+        "date/period header) — the tool for TIMING questions: the riskiest month, when "
+        "DSCR dips, the lease-up ramp, a draw/interest spike. Monthly models are too wide "
+        "for read_sheet; use this on the cash-flow engine tab. Find the row first with "
+        "search_file (e.g. 'Levered Cash Flow', 'NOI', 'DSCR'), then pass its sheet + label "
+        "or row number here.",
+        "parameters": {"type": "object", "properties": {
+            "sheet_name": {"type": "string"},
+            "row": {"type": "string", "description": "A row label (e.g. 'Levered Cash Flow') "
+                    "or a 1-based row number."}},
+            "required": ["sheet_name", "row"]}}},
     {"type": "function", "function": {"name": "what_if",
         "description": "Recompute IRR and equity multiple under an UPFRONT capex / "
         "additional-investment change funded by equity. Deterministic — call this for any "
@@ -229,6 +269,8 @@ def _chat_dispatch(name: str, args: dict, fname: str) -> Any:
         return _tools.read_sheet(fname, args.get("sheet_name", ""), args.get("max_rows", 80))
     if name == "list_sheets":
         return _tools.list_sheets(fname)
+    if name == "read_row_series":
+        return _tools.read_row_series(fname, args.get("sheet_name", ""), args.get("row", ""))
     if name == "what_if":
         return _tools.run_what_if_capex(args.get("amount", 0), args.get("funded_by", "equity"), fname)
     return {"error": f"unknown tool {name}"}
@@ -272,7 +314,8 @@ def _sheet_catalog(fname: str) -> str:
             + "\n".join(lines) + "\n\n")
 
 
-def _chat_system(fs: dict, fname: str = "", read_md: str | None = None) -> str:
+def _chat_system(fs: dict, fname: str = "", read_md: str | None = None,
+                 engine_sheet: str | None = None, phasing: dict | None = None) -> str:
     from interpretation import render_fact_sheet
     catalog = _sheet_catalog(fname) if fname else ""
     read_block = (
@@ -280,6 +323,26 @@ def _chat_system(fs: dict, fname: str = "", read_md: str | None = None) -> str:
         "consistent with it; build on it in conversation, don't restate it verbatim):\n"
         + read_md + "\n\n"
     ) if read_md else ""
+    # Point the agent at the monthly cash-flow engine + the deal's phases so a
+    # TIMING/RISK question ("riskiest month", "when does coverage dip") is answered by
+    # reasoning over the actual monthly stream — never deflected with "I only have the
+    # summary." The engine tab is where the validated stream lives.
+    reason_block = ""
+    if engine_sheet:
+        ph = ""
+        if phasing and phasing.get("kind") and phasing["kind"] != "none":
+            ph = ("  Deal phases (from the model): "
+                  + "; ".join(f"{k}={v}" for k, v in phasing.items()
+                              if k in ("kind", "delivery", "stabilization", "construction_end",
+                                       "leaseup_end") and v) + ".\n")
+        reason_block = (
+            f"\nDEEPER REASONING — the monthly cash-flow ENGINE is tab '{engine_sheet}'. "
+            "For any question about TIMING or RISK over the hold (riskiest month/period, "
+            "when DSCR or cash flow dips, the lease-up ramp, a draw or rate spike, "
+            "sensitivity to a delay), do NOT stop at the fact sheet: use read_row_series on "
+            "the engine tab (find the row with search_file first) to pull the month-by-month "
+            "series and REASON over it — identify the trough, the tightest coverage window, "
+            "the exposure — then answer with the specific periods. Cite the tab/row.\n" + ph)
     return (
         "You are a sharp, curious asset manager with the deal's FULL underwriting workbook "
         "open in front of you. You have THREE sources and must use them appropriately:\n"
@@ -289,7 +352,8 @@ def _chat_system(fs: dict, fname: str = "", read_md: str | None = None) -> str:
         "deal, with its own findings and judgment, and\n"
         "  (C) the LIVE WORKBOOK — everything else: rent roll, unit/tenant detail, property "
         "info, leases, every assumption and schedule. The tabs are listed below; reach into "
-        "them with list_sheets / search_file / read_sheet.\n\n"
+        "them with list_sheets / search_file / read_sheet, and read a full monthly series "
+        "with read_row_series.\n\n"
         "Hard rules:\n"
         "1. The fact sheet is authoritative for what it covers — prefer it, obey its "
         "guardrails, never contradict it.\n"
@@ -311,7 +375,7 @@ def _chat_system(fs: dict, fname: str = "", read_md: str | None = None) -> str:
         "single line item, not a footed total — hedge it accordingly rather than stating it "
         "with T1 certainty.\n"
         "Never invent a number. Be concise, but be genuinely helpful — dig.\n\n"
-        + catalog + render_fact_sheet(fs) + "\n\n" + read_block).rstrip()
+        + catalog + render_fact_sheet(fs) + "\n\n" + reason_block + read_block).rstrip()
 
 
 @app.post("/api/chat")
@@ -326,14 +390,26 @@ async def chat(session_id: str = Form(...), message: str = Form(...)):
     if client is None:
         return {"reply": "Chat needs an API key. The validated fact sheet is still available."}
 
+    # Per-session question budget (this is a focused analyst, not an open chatbot):
+    # three substantive questions, then the session is capped. [[chat-reasoning-tiers]]
+    sess["turns"] = int(sess.get("turns") or 0) + 1
+    if sess["turns"] > CHAT_QUESTION_CAP:
+        log.info("[%s] chat cap reached (%d)", session_id, CHAT_QUESTION_CAP)
+        return {"reply": f"You've reached this session's {CHAT_QUESTION_CAP}-question limit. "
+                "Re-run the analysis to start a fresh session, or work from the validated "
+                "fact sheet and investment read above.", "capped": True,
+                "questions_used": sess["turns"] - 1, "question_cap": CHAT_QUESTION_CAP}
+
     if not sess.get("history"):
         sess["history"] = [{"role": "system",
                             "content": _chat_system(sess["fact_sheet"], sess["model_filename"],
-                                                    sess.get("read_md"))}]
+                                                    sess.get("read_md"), sess.get("engine_sheet"),
+                                                    sess.get("phasing"))}]
     hist = sess["history"]
     hist.append({"role": "user", "content": message})
     fname = sess["model_filename"]
-    log.info("[%s] chat turn — message_chars=%d", session_id, len(message))
+    log.info("[%s] chat turn %d/%d — message_chars=%d", session_id, sess["turns"],
+             CHAT_QUESTION_CAP, len(message))
 
     for _ in range(6):
         try:
