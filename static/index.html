@@ -460,8 +460,29 @@ function renderDeal(d){
     b.textContent='⚠ '+FS.banner;
     $('facts').insertBefore(b, $('facts').firstChild);
   }
-  $('memo').innerHTML=marked.parse(d.read_md||'');
+  // Phase 2: the deterministic grid is up; fetch the GPT enrichment (headline-fact
+  // refinements + the written memo) in the background and slot it in when it lands, so
+  // the browser never blocks ~60s on the slow model calls.
+  if(d.enriching && SID){
+    $('memo').innerHTML='<span class="na">✍️ Writing the investment read…</span>';
+    enrichDeal(SID);
+  } else {
+    $('memo').innerHTML=marked.parse(d.read_md||'');
+  }
   renderDetail(d, FS);
+}
+
+async function enrichDeal(sid){
+  try{
+    const fd=new FormData(); fd.append('session_id',sid);
+    const r=await fetch('/api/enrich',{method:'POST',body:fd});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.fact_sheet && d.fact_sheet.deal){ FS=d.fact_sheet; renderSummary(FS); renderDetail(d, FS); }
+    $('memo').innerHTML = d.read_md ? marked.parse(d.read_md) : '';
+  }catch(e){
+    $('memo').innerHTML='';   // memo unavailable — the validated grid still stands
+  }
 }
 
 function renderSummary(fs){

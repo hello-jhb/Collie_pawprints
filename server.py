@@ -139,11 +139,15 @@ async def analyze(model: UploadFile = File(...),
     from interpretation import assemble_fact_sheet, build_investment_read
 
     def _store(payload: dict, *, read_md: str | None, fs: dict, source: str | None,
-               engine_sheet: str | None = None, phasing: dict | None = None) -> dict:
+               engine_sheet: str | None = None, phasing: dict | None = None,
+               dt: dict | None = None, analysis: dict | None = None, perf: dict | None = None,
+               detail_md: str | None = None) -> dict:
         _SESSIONS[sid] = {"model_path": str(model_path), "model_filename": model_filename,
-                          "fact_sheet": fs, "read_md": read_md,
+                          "fact_sheet": fs, "read_md": read_md, "detail_md": detail_md,
                           "read_source": source, "history": None,
-                          "engine_sheet": engine_sheet, "phasing": phasing, "turns": 0}
+                          "engine_sheet": engine_sheet, "phasing": phasing, "turns": 0,
+                          # stashed for PHASE 2 (/api/enrich); None for limited/gpt_read
+                          "dt": dt, "analysis": analysis, "perf": perf, "enriched": dt is None}
         return payload
 
     # One request-scoped cache for every load below — the pipeline loads this file
@@ -178,43 +182,78 @@ async def analyze(model: UploadFile = File(...),
                               "in it — here's what we can see; ask about any sheet.")
             return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
 
-        # GPT proposes, oracle disposes: audit the engine's headline facts against the
-        # summary sheet and correct a WEAK pick (never a validated one; a suggestion that
-        # fails an invariant like cost≥debt is rejected). Degrades to the engine's facts.
-        try:
-            from fact_review import review_headline_facts
-            dt["canonical"] = review_headline_facts(model_path, dt)
-        except Exception as e:  # noqa: BLE001
-            log.warning("[%s] headline review skipped (%s)", sid, e)
-
-        # Enrichment stages: any failure degrades to limited rather than severing.
+        # PHASE 1 — DETERMINISTIC read only, returned FAST. The slow, sequential GPT work
+        # (headline-fact review + the written memo) is deferred to PHASE 2 (/api/enrich),
+        # which the frontend fires right after it renders this. This keeps the first
+        # response well under the browser's ~60s connection cutoff. Crucially, today's
+        # correctness fixes (unit total, cost≥debt, exit-not-a-comp) are all deterministic,
+        # so the grid is already RIGHT here — enrichment only refines a field or two + memo.
         try:
             analysis = build_analysis(model_path, dt=dt)
-
             perf = None
             if actuals_paths:
                 from perf_vs_plan_engine import build_perf_vs_plan
                 perf = build_perf_vs_plan(model_path, actuals_paths)
                 perf = perf if perf.get("ok") else None
-
-            read = build_investment_read(model_path, dt=dt, analysis=analysis,
-                                         perf=perf, analysis_id=sid)
-            fs = read.get("fact_sheet") or assemble_fact_sheet(
-                model_path, dt=dt, analysis=analysis, perf=perf, analysis_id=sid)
-        except Exception as e:  # noqa: BLE001 - never let enrichment sever the request
-            log.exception("[%s] analyze — enrichment failed after engine validated: %s", sid, e)
+            fs = assemble_fact_sheet(model_path, dt=dt, analysis=analysis,
+                                     perf=perf, analysis_id=sid)
+        except Exception as e:  # noqa: BLE001 - never let a stage sever the request
+            log.exception("[%s] analyze — deterministic read failed after engine validated: %s", sid, e)
             r = _limited_read(model_path, model_filename, sid,
                               "We validated your file's engine but hit a snag building the full "
                               "read — here's what we can see; ask about any sheet.")
             return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
 
-    log.info("[%s] analyze DONE mode=%s narrative_source=%s", sid, fs.get("mode"), read.get("source"))
+    log.info("[%s] analyze DONE (phase 1, deterministic) mode=%s", sid, fs.get("mode"))
     payload = {"session_id": sid, "mode": fs.get("mode"),
-               "read_md": read.get("md"), "detail_md": analysis.get("md"),
-               "fact_sheet": fs}
-    return _store(payload, read_md=read.get("md"), fs=fs, source=read.get("source"),
+               "read_md": None, "detail_md": analysis.get("md"),
+               "fact_sheet": fs, "enriching": True}
+    return _store(payload, read_md=None, fs=fs, source="deterministic", detail_md=analysis.get("md"),
                   engine_sheet=dt.get("cashflow_engine"),
-                  phasing=(fs.get("deal", {}) or {}).get("phasing"))
+                  phasing=(fs.get("deal", {}) or {}).get("phasing"),
+                  dt=dt, analysis=analysis, perf=perf)
+
+
+@app.post("/api/enrich")
+async def enrich(session_id: str = Form(...)):
+    """PHASE 2 — the deferred GPT work: audit the headline facts against the summary
+    (correcting a weak pick) and write the investment-read memo. Fired by the frontend
+    after it renders the fast deterministic grid, so the browser never blocks on it.
+    Idempotent; degrades to the deterministic read on any failure."""
+    sess = _SESSIONS.get(session_id)
+    if not sess:
+        raise HTTPException(404, "unknown session")
+    if sess.get("enriched") or sess.get("dt") is None:
+        return {"fact_sheet": sess.get("fact_sheet"), "read_md": sess.get("read_md"),
+                "detail_md": sess.get("detail_md"), "enriched": True}
+
+    from interpretation import assemble_fact_sheet, build_investment_read
+    from wb_io import workbook_cache
+    model_path = Path(sess["model_path"])
+    dt, analysis, perf = sess["dt"], sess["analysis"], sess.get("perf")
+    log.info("[%s] enrich START (phase 2)", session_id)
+    try:
+        with workbook_cache():
+            try:
+                from fact_review import review_headline_facts
+                dt["canonical"] = review_headline_facts(model_path, dt)
+            except Exception as e:  # noqa: BLE001
+                log.warning("[%s] headline review skipped (%s)", session_id, e)
+            read = build_investment_read(model_path, dt=dt, analysis=analysis,
+                                         perf=perf, analysis_id=session_id)
+            fs = read.get("fact_sheet") or assemble_fact_sheet(
+                model_path, dt=dt, analysis=analysis, perf=perf, analysis_id=session_id)
+    except Exception as e:  # noqa: BLE001 - keep the deterministic read on failure
+        log.exception("[%s] enrich failed — keeping deterministic read: %s", session_id, e)
+        sess["enriched"] = True
+        return {"fact_sheet": sess.get("fact_sheet"), "read_md": sess.get("read_md"),
+                "detail_md": sess.get("detail_md"), "enriched": True}
+
+    sess.update({"fact_sheet": fs, "read_md": read.get("md"), "detail_md": analysis.get("md"),
+                 "read_source": read.get("source"), "enriched": True, "history": None})
+    log.info("[%s] enrich DONE narrative_source=%s", session_id, read.get("source"))
+    return {"fact_sheet": fs, "read_md": read.get("md"), "detail_md": analysis.get("md"),
+            "enriched": True}
 
 
 # Chat tools — the agent answers from the fact sheet first, REVISITS the workbook for
