@@ -211,6 +211,16 @@ def find_concept(concept: str, file_path: Path, m: dict) -> dict[str, Any] | Non
             log.info("Gap-fill FOUND for %s on %s!%s — %r",
                       concept, sheet, result.get("cell"), str(value)[:50])
             display = f"{sheet}!{result.get('cell')}"
+            # Feed the loop: GPT found a concept the deterministic catalog MISSED —
+            # the matched label is a prime candidate for a new alias-catalog entry.
+            try:
+                from learning_store import record_resolution, file_fingerprint, FILLED
+                record_resolution(layer="concept_fallback", concept=concept, decision=FILLED,
+                                   file=Path(file_path).name, file_hash=file_fingerprint(file_path),
+                                   label=result.get("label_in_sheet"), chosen_value=value,
+                                   chosen_cell=display, reason=(result.get("reasoning") or "")[:160])
+            except Exception:  # pragma: no cover - never block extraction
+                pass
             return {
                 "concept":     concept,
                 "value":       value,

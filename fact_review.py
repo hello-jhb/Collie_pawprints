@@ -193,14 +193,32 @@ def review_headline_facts(file_path: str | Path, dt: dict) -> dict:
         log.warning("review call failed (%s: %s) — keeping engine facts", type(e).__name__, e)
         return canonical
 
+    # Feed every decision to the learning store so recurring corrections can later be
+    # promoted into the deterministic layer. Best-effort — never blocks the review.
+    try:
+        from learning_store import (record_resolution, file_fingerprint,
+                                     AGREED, CORRECTED, REJECTED)
+        fhash = file_fingerprint(file_path)
+    except Exception:  # pragma: no cover
+        record_resolution = None
+
+    def _log_decision(**kw):
+        if record_resolution:
+            try:
+                record_resolution(layer="fact_review", file=file_path.name, file_hash=fhash, **kw)
+            except Exception:  # pragma: no cover
+                pass
+
     changed = 0
     for field, r in (review or {}).items():
         if field not in canonical or not isinstance(r, dict):
             continue
         cur = canonical[field]
         if _is_validated(cur):
-            continue                       # oracle disposes — locked
+            continue                       # oracle disposes — locked (not a GPT decision)
         if r.get("ok", True):
+            _log_decision(concept=field, decision=AGREED, prior_value=_num(cur),
+                          prior_source=cur.get("source"), confidence=r.get("confidence"))
             continue                       # GPT agrees with the engine
         val = r.get("value")
         try:
@@ -211,6 +229,11 @@ def review_headline_facts(file_path: str | Path, dt: dict) -> dict:
             continue
         if not _passes_invariants(field, val, canonical):
             log.info("review REJECTED %s=%s (fails invariant/range) — engine value kept", field, val)
+            _log_decision(concept=field, decision=REJECTED, label=r.get("cell"),
+                          prior_value=_num(cur), prior_source=cur.get("source"),
+                          chosen_value=val, chosen_cell=r.get("cell"),
+                          confidence=r.get("confidence"),
+                          reason="fails invariant/range")
             continue
         canonical[field] = {
             "concept": field, "value": val,
@@ -222,6 +245,10 @@ def review_headline_facts(file_path: str | Path, dt: dict) -> dict:
         }
         changed += 1
         log.info("review CORRECTED %s: %s -> %s (%s)", field, _num(cur), val, r.get("cell"))
+        _log_decision(concept=field, decision=CORRECTED, label=r.get("cell"),
+                      prior_value=_num(cur), prior_source=cur.get("source"),
+                      chosen_value=val, chosen_cell=r.get("cell"),
+                      confidence=r.get("confidence"), reason=(r.get("note") or "")[:160])
 
     log.info("headline review for %s — %d field(s) corrected of %d audited",
              file_path.name, changed, len(present))

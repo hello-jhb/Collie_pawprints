@@ -162,5 +162,16 @@ def build_gpt_read(file_path: str | Path, model_filename: str, sid: str, dt: dic
     ])
     log.info("[%s] tier-2 GPT read built (type=%s cost=%s exit=%s)", sid,
              g.get("property_type"), targets["total_cost"], targets["sale_price"])
+    # Record that this file fell through to an unvalidated summary read — recurring
+    # Tier-2 files are candidates for a deterministic engine improvement.
+    try:
+        from learning_store import record_resolution, file_fingerprint, READ
+        record_resolution(layer="tier2_read", concept="__deal__", decision=READ,
+                          file=Path(model_filename).name.split("__", 1)[-1],
+                          file_hash=file_fingerprint(file_path),
+                          label=g.get("property_type"), reason=(dt.get("reason") or "")[:160],
+                          extra={"deal_type": g.get("deal_type")})
+    except Exception:  # pragma: no cover
+        pass
     return {"session_id": sid, "mode": "gpt_read", "read_md": read_md,
             "detail_md": None, "fact_sheet": fs}

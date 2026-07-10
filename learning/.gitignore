@@ -1,0 +1,3 @@
+# Runtime learning-loop capture — not source. Keep the dir, ignore the data.
+events.jsonl
+*.jsonl
