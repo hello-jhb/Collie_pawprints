@@ -42,6 +42,11 @@ ACTUALS_MAX_BYTES = 5 * 1024 * 1024     # financial statements: 5MB each
 # Focused-analyst chat: a small per-session question budget, not an open chatbot.
 CHAT_QUESTION_CAP = int(os.getenv("CHAT_QUESTION_CAP", "3"))
 
+# Early-access sign-up capture → a Google Sheet via an Apps Script web-app URL. Kept
+# server-side (not in the page source) so the webhook can't be scraped/spammed. Unset =
+# sign-ups are logged only; access is still granted (auto-grant, never blocked on capture).
+ACCESS_SHEET_WEBHOOK = os.getenv("ACCESS_SHEET_WEBHOOK", "")
+
 _STATIC = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_STATIC):
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
@@ -497,6 +502,32 @@ async def whatif(session_id: str = Form(...), amount: float = Form(...),
         raise HTTPException(404, "unknown session")
     from whatif import what_if_capex
     return what_if_capex(sess["model_path"], amount, funded_by=funded_by)
+
+
+@app.post("/api/access")
+async def access(name: str = Form(...), email: str = Form(...)):
+    """Capture an early-access sign-up (name + company email) to the configured Google
+    Sheet. Best-effort and NON-blocking: the page grants access regardless, so a Sheet
+    outage never locks anyone out. Returns 200 always."""
+    name = (name or "").strip()[:200]
+    email = (email or "").strip()[:200]
+    if not name or "@" not in email or "." not in email.split("@")[-1]:
+        return {"ok": False, "reason": "name and a valid email are required"}
+    if not ACCESS_SHEET_WEBHOOK:
+        log.info("access signup (not persisted — ACCESS_SHEET_WEBHOOK unset): %s <%s>", name, email)
+        return {"ok": True, "stored": False}
+    import urllib.request
+    try:
+        body = json.dumps({"name": name, "email": email,
+                           "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z"}).encode()
+        req = urllib.request.Request(ACCESS_SHEET_WEBHOOK, data=body,
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        urllib.request.urlopen(req, timeout=5)     # follows Apps Script's redirect
+        log.info("access signup captured: %s <%s>", name, email)
+        return {"ok": True, "stored": True}
+    except Exception as e:  # noqa: BLE001 - never block access on a capture failure
+        log.warning("access signup capture failed (%s: %s): %s <%s>", type(e).__name__, e, name, email)
+        return {"ok": True, "stored": False}
 
 
 @app.get("/healthz")

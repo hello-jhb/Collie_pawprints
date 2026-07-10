@@ -159,7 +159,9 @@
   <section id="accessView" class="gate">
     <h1 class="page-title">Deal Analyzer</h1>
     <p class="paw-prints-headline">A prototype by Collie</p>
-    <p class="paw-prints-desc">Deal Analyzer reconstructs the original investment thesis from an acquisition underwriting model and compares it with actual operating performance. It is designed to help real estate investment professionals quickly understand an investment, identify what has changed since acquisition, and establish context for further analysis.</p>
+    <p class="paw-prints-desc" style="margin-bottom:16px">Deal Analyzer reconstructs the original investment thesis from an acquisition underwriting model and compares it with actual operating performance. It is designed to help real estate investment professionals quickly understand an investment, identify what has changed since acquisition, and establish context for further analysis.</p>
+
+    <p class="paw-prints-desc" style="font-size:13px;line-height:1.5;margin-bottom:48px"><strong style="color:var(--ink)">Your files stay yours.</strong> We do not store the underwriting files you upload — they're used only to generate your analysis, then discarded. Analysis is produced with OpenAI's API, which processes the file's contents to return your results.</p>
 
     <hr class="divider" />
 
@@ -172,12 +174,8 @@
         <input type="text" id="accName" />
       </label>
       <label class="field">
-        <span class="field-label">Work Email</span>
-        <input type="email" id="accEmail" />
-      </label>
-      <label class="field">
-        <span class="field-label">Company</span>
-        <input type="text" id="accCompany" />
+        <span class="field-label">Company email</span>
+        <input type="email" id="accEmail" placeholder="you@company.com" />
       </label>
     </div>
 
@@ -277,7 +275,7 @@ const inline=(...items)=>`<div class="inline">${items.join('<span class="sep">�
 const inlineMore=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}<span class="sep">•</span></div>`;
 
 // access form wiring
-const accFields=['accName','accEmail','accCompany'];
+const accFields=['accName','accEmail'];
 const ackFields=['ackPrototype','ackPermission'];
 [...accFields,...ackFields].forEach(id=>$(id).addEventListener('input',validateAccess));
 ackFields.forEach(id=>$(id).addEventListener('change',validateAccess));
@@ -286,7 +284,15 @@ function validateAccess(){
   const ackOk=ackFields.every(id=>$(id).checked);
   $('continueBtn').disabled=!(fieldsOk&&ackOk);
 }
-$('continueBtn').onclick=()=>{
+$('continueBtn').onclick=async()=>{
+  // Capture the sign-up (best-effort) — never block entry on it (auto-grant).
+  const btn=$('continueBtn'); btn.disabled=true; btn.textContent='Entering…';
+  try{
+    const fd=new FormData();
+    fd.append('name',$('accName').value.trim());
+    fd.append('email',$('accEmail').value.trim());
+    await fetch('/api/access',{method:'POST',body:fd});
+  }catch(e){/* ignore — capture is best-effort */}
   $('accessView').style.display='none';
   $('appView').style.display='block';
 };
