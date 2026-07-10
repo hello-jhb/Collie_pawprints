@@ -44,8 +44,14 @@
   .field{display:flex;flex-direction:column;gap:2px}
   .field-label{font-size:12px;color:var(--muted);font-weight:600}
   .field input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:0;padding:10px 12px}
-  .checkbox-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--muted);margin:0 0 10px}
+  .checkbox-row{display:flex;align-items:flex-start;gap:8px;font-size:13px;color:var(--muted);margin:0 0 6px}
   .checkbox-row input{margin-top:2px;accent-color:var(--accent)}
+  .gate a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+  .gate a:hover{color:#2549b8}
+  /* file-handling reassurance — visually secondary to the consent label */
+  .acc-reassure{font-size:11.5px;line-height:1.5;color:var(--hint);margin:0 0 0 24px;max-width:52ch}
+  /* clear keyboard focus states for accessibility */
+  .checkbox-row input:focus-visible,#continueBtn:focus-visible,.gate a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .upload-actions{display:flex;justify-content:flex-start;gap:12px;margin-top:36px}
   .upload-label{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 12px}
 
@@ -166,7 +172,7 @@
     <hr class="divider" />
 
     <div class="upload-label">Early Access</div>
-    <p class="paw-prints-desc" style="margin-bottom:24px">This prototype is being released to a limited group of professionals for evaluation and feedback.</p>
+    <p class="paw-prints-desc" style="margin-bottom:24px">We're inviting a limited group of investment professionals to evaluate the first version of Collie.</p>
 
     <div class="form-grid">
       <label class="field">
@@ -174,13 +180,13 @@
         <input type="text" id="accName" />
       </label>
       <label class="field">
-        <span class="field-label">Company email</span>
+        <span class="field-label">Work email</span>
         <input type="email" id="accEmail" placeholder="you@company.com" />
       </label>
     </div>
 
-    <label class="checkbox-row"><input type="checkbox" id="ackPrototype" /><span>I understand this is an early prototype.</span></label>
-    <label class="checkbox-row"><input type="checkbox" id="ackPermission" /><span>I confirm I have permission to upload these documents.</span></label>
+    <label class="checkbox-row"><input type="checkbox" id="ackDisclaimer" /><span>I have read and agree to the <a href="/prototype-disclaimer" target="_blank" rel="noopener">Prototype Disclaimer</a>.</span></label>
+    <p class="acc-reassure">Uploaded files are processed only to generate your analysis and are not used to train underlying AI models.</p>
 
     <div class="upload-actions">
       <button id="continueBtn" disabled>Continue</button>
@@ -276,22 +282,28 @@ const inline=(...items)=>`<div class="inline">${items.join('<span class="sep">�
 const inlineMore=(...items)=>`<div class="inline">${items.join('<span class="sep">•</span>')}<span class="sep">•</span></div>`;
 
 // access form wiring
-const accFields=['accName','accEmail'];
-const ackFields=['ackPrototype','ackPermission'];
-[...accFields,...ackFields].forEach(id=>$(id).addEventListener('input',validateAccess));
-ackFields.forEach(id=>$(id).addEventListener('change',validateAccess));
+const DISCLAIMER_VERSION='2026-07-10';
+['accName','accEmail'].forEach(id=>$(id).addEventListener('input',validateAccess));
+$('ackDisclaimer').addEventListener('change',validateAccess);
+function emailValid(){ const e=$('accEmail'); return e.value.trim()!=='' && e.checkValidity(); }
 function validateAccess(){
-  const fieldsOk=accFields.every(id=>$(id).value.trim());
-  const ackOk=ackFields.every(id=>$(id).checked);
-  $('continueBtn').disabled=!(fieldsOk&&ackOk);
+  const nameOk=$('accName').value.trim()!=='';
+  const eOk=emailValid();
+  const ackOk=$('ackDisclaimer').checked;
+  $('continueBtn').disabled=!(nameOk&&eOk&&ackOk);
+  // Inline (no alert): once name + email are in but consent is missing, say why.
+  $('accErr').textContent=(nameOk&&eOk&&!ackOk)
+    ? 'Please review and agree to the Prototype Disclaimer to continue.' : '';
 }
 $('continueBtn').onclick=async()=>{
-  // Capture the sign-up (best-effort) — never block entry on it (auto-grant).
+  // Capture the sign-up + consent (best-effort) — never block entry on it (auto-grant).
   const btn=$('continueBtn'); btn.disabled=true; btn.textContent='Entering…';
   try{
     const fd=new FormData();
     fd.append('name',$('accName').value.trim());
     fd.append('email',$('accEmail').value.trim());
+    fd.append('disclaimer_accepted', $('ackDisclaimer').checked ? 'true' : 'false');
+    fd.append('disclaimer_version', DISCLAIMER_VERSION);
     await fetch('/api/access',{method:'POST',body:fd});
   }catch(e){/* ignore — capture is best-effort */}
   $('accessView').style.display='none';

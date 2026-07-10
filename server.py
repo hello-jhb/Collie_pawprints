@@ -505,25 +505,30 @@ async def whatif(session_id: str = Form(...), amount: float = Form(...),
 
 
 @app.post("/api/access")
-async def access(name: str = Form(...), email: str = Form(...)):
-    """Capture an early-access sign-up (name + company email) to the configured Google
-    Sheet. Best-effort and NON-blocking: the page grants access regardless, so a Sheet
-    outage never locks anyone out. Returns 200 always."""
+async def access(name: str = Form(...), email: str = Form(...),
+                 disclaimer_accepted: str = Form("false"), disclaimer_version: str = Form("")):
+    """Capture an early-access sign-up (name + work email + Prototype Disclaimer consent)
+    to the configured Google Sheet. Best-effort and NON-blocking: the page grants access
+    regardless, so a Sheet outage never locks anyone out. Returns 200 always."""
     name = (name or "").strip()[:200]
     email = (email or "").strip()[:200]
+    accepted = str(disclaimer_accepted).strip().lower() in ("true", "1", "yes")
+    version = (disclaimer_version or "").strip()[:40] or "2026-07-10"
     if not name or "@" not in email or "." not in email.split("@")[-1]:
         return {"ok": False, "reason": "name and a valid email are required"}
+    record = {"name": name, "email": email,
+              "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+              "disclaimer_accepted": accepted, "disclaimer_version": version}
     if not ACCESS_SHEET_WEBHOOK:
-        log.info("access signup (not persisted — ACCESS_SHEET_WEBHOOK unset): %s <%s>", name, email)
+        log.info("access signup (not persisted — ACCESS_SHEET_WEBHOOK unset): %s <%s> "
+                 "consent=%s v=%s", name, email, accepted, version)
         return {"ok": True, "stored": False}
     import urllib.request
     try:
-        body = json.dumps({"name": name, "email": email,
-                           "ts": __import__("datetime").datetime.utcnow().isoformat() + "Z"}).encode()
-        req = urllib.request.Request(ACCESS_SHEET_WEBHOOK, data=body,
+        req = urllib.request.Request(ACCESS_SHEET_WEBHOOK, data=json.dumps(record).encode(),
                                      headers={"Content-Type": "application/json"}, method="POST")
         urllib.request.urlopen(req, timeout=5)     # follows Apps Script's redirect
-        log.info("access signup captured: %s <%s>", name, email)
+        log.info("access signup captured: %s <%s> consent=%s v=%s", name, email, accepted, version)
         return {"ok": True, "stored": True}
     except Exception as e:  # noqa: BLE001 - never block access on a capture failure
         log.warning("access signup capture failed (%s: %s): %s <%s>", type(e).__name__, e, name, email)
@@ -608,6 +613,16 @@ def learning_dashboard(token: str = ""):
     by design (promotion stays a human decision you and I make together)."""
     _check_admin(token)
     return HTMLResponse(_LEARNING_HTML)
+
+
+@app.get("/prototype-disclaimer")
+def prototype_disclaimer():
+    """Standalone disclaimer page — served at its own route so it loads directly and in a
+    new tab from the early-access screen."""
+    page = os.path.join(_STATIC, "prototype-disclaimer.html")
+    if os.path.isfile(page):
+        return FileResponse(page)
+    raise HTTPException(404, "disclaimer page not found")
 
 
 @app.get("/")
