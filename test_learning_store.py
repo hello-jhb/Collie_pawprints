@@ -56,6 +56,32 @@ def test_promotion_needs_multiple_distinct_files(store):
     assert cands[0]["concept"] == "debt_yield" and cands[0]["distinct_files"] == 2
 
 
+def test_firestore_backend_degrades_without_lib(monkeypatch, tmp_path):
+    """Selecting the firestore backend when the lib/creds are absent must NOT crash —
+    capture degrades silently so analyze is never blocked in production."""
+    monkeypatch.setenv("COLLIE_LEARNING_DIR", str(tmp_path))
+    monkeypatch.setenv("COLLIE_LEARNING_BACKEND", "firestore")
+    import learning_store
+    importlib.reload(learning_store)
+    learning_store.record_resolution(layer="x", concept="y", decision="corrected")  # no raise
+    assert learning_store.read_events() == []
+    st = learning_store.backend_status()
+    assert st["backend"] == "firestore" and st["reachable"] is False
+
+
+def test_dashboard_is_safe_by_default(monkeypatch):
+    """No COLLIE_ADMIN_TOKEN → the dashboard refuses (no public data leak); a matching
+    token → it serves."""
+    from fastapi.testclient import TestClient
+    import server
+    monkeypatch.delenv("COLLIE_ADMIN_TOKEN", raising=False)
+    c = TestClient(server.app)
+    assert c.get("/api/learning").status_code == 403
+    monkeypatch.setenv("COLLIE_ADMIN_TOKEN", "s3cret")
+    assert c.get("/api/learning?token=wrong").status_code == 401
+    assert c.get("/api/learning?token=s3cret").status_code == 200
+
+
 def test_summarize_counts(store):
     store.record_resolution(layer="fact_review", concept="debt", decision=store.AGREED,
                             file="a.xlsx", file_hash="sha1:a")

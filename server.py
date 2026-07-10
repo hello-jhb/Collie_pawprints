@@ -465,6 +465,81 @@ def healthz():
     return {"ok": True}
 
 
+_LEARNING_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Collie · Learning Loop</title><style>
+ body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px;color:#1a1a1a;background:#fafafa}
+ h1{font-size:20px;margin:0 0 4px} .sub{color:#666;margin:0 0 20px}
+ .card{background:#fff;border:1px solid #e5e5e5;border-radius:10px;padding:16px 18px;margin:0 0 16px}
+ .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#888;margin:0 0 8px}
+ .pill{display:inline-block;padding:2px 8px;border-radius:12px;font-size:12px;margin:2px 6px 2px 0;background:#eef}
+ .ok{color:#0a7d33} .bad{color:#b42318}
+ table{border-collapse:collapse;width:100%;font-size:13px} th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eee;vertical-align:top}
+ th{color:#666;font-weight:600} .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+ .cand{background:#fffdf5} .tag{font-size:11px;padding:1px 6px;border-radius:6px;background:#eee;margin-right:4px}
+ .warn{background:#fff4e5;border-color:#f0c98a}
+</style></head><body>
+<h1>Collie · Learning Loop</h1>
+<p class="sub">Read-only. Captures every GPT resolution; <b>promotion into Python stays a human decision</b> — nothing here changes the engine.</p>
+<div id="status" class="card">Loading…</div>
+<div class="card"><div class="lbl">Promotion candidates — patterns recurring across ≥2 distinct files</div><div id="cands">—</div></div>
+<div class="card"><div class="lbl">Recent decisions</div><div id="recent">—</div></div>
+<script>
+const qs=new URLSearchParams(location.search), token=qs.get('token')||'';
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const money=v=>typeof v==='number'?(Math.abs(v)>=1e6?'$'+(v/1e6).toFixed(1)+'M':(''+v)):esc(v);
+fetch('/api/learning?token='+encodeURIComponent(token)+'&recent=80').then(r=>r.json()).then(d=>{
+ const b=d.backend||{}, s=d.summary||{};
+ const reach=b.reachable?'<span class="ok">reachable</span>':'<span class="bad">unreachable</span>';
+ document.getElementById('status').innerHTML=
+   '<div class="lbl">Backend</div><b>'+esc(b.backend)+'</b> · '+reach+(b.collection?' · '+esc(b.collection):'')+(b.path?' · <span class="mono">'+esc(b.path)+'</span>':'')+
+   '<div style="margin-top:10px" class="lbl">Totals</div>'+
+   '<span class="pill">'+ (s.total||0) +' events</span><span class="pill">'+(s.distinct_files||0)+' files</span>'+
+   Object.entries(s.by_decision||{}).map(([k,v])=>'<span class="pill">'+esc(k)+': '+v+'</span>').join('');
+ const c=d.promotion_candidates||[];
+ document.getElementById('cands').innerHTML = c.length? '<table><tr><th>Concept</th><th>Label seen</th><th>Layer</th><th>Files</th><th>Decisions</th><th>Example</th></tr>'+
+   c.map(x=>'<tr class="cand"><td><b>'+esc(x.concept)+'</b></td><td>'+esc(x.label)+'</td><td>'+esc(x.layer)+'</td><td>'+x.distinct_files+'</td><td>'+esc(JSON.stringify(x.decisions))+'</td><td class="mono">'+(x.examples&&x.examples[0]?money(x.examples[0].prior_value)+' → '+money(x.examples[0].chosen_value)+' @ '+esc(x.examples[0].chosen_cell):'')+'</td></tr>').join('')+'</table>'
+   : '<span style="color:#888">None yet — a pattern needs the same correction on ≥2 different files.</span>';
+ const r=d.recent||[];
+ document.getElementById('recent').innerHTML = r.length? '<table><tr><th>When</th><th>Layer</th><th>Concept</th><th>Decision</th><th>Prior→Chosen</th><th>Reason</th></tr>'+
+   r.map(e=>'<tr><td class="mono">'+esc(e.ts)+'</td><td>'+esc(e.layer)+'</td><td>'+esc(e.concept)+'</td><td><span class="tag">'+esc(e.decision)+'</span></td><td class="mono">'+money(e.prior_value)+' → '+money(e.chosen_value)+'</td><td>'+esc(e.reason)+'</td></tr>').join('')+'</table>'
+   : '<span style="color:#888">No decisions captured yet.</span>';
+}).catch(e=>{document.getElementById('status').innerHTML='<span class="bad">Failed to load: '+esc(e.message)+'</span> — check ?token=.';});
+</script></body></html>"""
+
+
+# --- Learning-loop dashboard (read-only, capture-only — NEVER promotes) ------
+# Safe-by-default: serves your captured data ONLY when COLLIE_ADMIN_TOKEN is set and
+# the request presents it. Unset → 403, so a public Cloud Run URL can't leak the
+# underwriting values/filenames the store captures.
+def _check_admin(token: str | None) -> None:
+    want = os.getenv("COLLIE_ADMIN_TOKEN")
+    if not want:
+        raise HTTPException(403, "Learning dashboard is disabled — set COLLIE_ADMIN_TOKEN "
+                            "in the environment to enable it.")
+    if token != want:
+        raise HTTPException(401, "invalid or missing token")
+
+
+@app.get("/api/learning")
+def learning_api(token: str = "", min_files: int = 2, recent: int = 50):
+    """JSON: what the loop has captured + which patterns recur enough to promote."""
+    _check_admin(token)
+    import learning_store as L
+    return {"backend": L.backend_status(), "summary": L.summarize(),
+            "promotion_candidates": L.promotion_candidates(min_files=min_files),
+            "recent": list(reversed(L.read_events(limit=recent)))}
+
+
+@app.get("/learning")
+def learning_dashboard(token: str = ""):
+    """A plain read-only dashboard so you can eyeball the loop from time to time. It
+    fetches /api/learning with the same token and renders it — no promotion controls,
+    by design (promotion stays a human decision you and I make together)."""
+    _check_admin(token)
+    return HTMLResponse(_LEARNING_HTML)
+
+
 @app.get("/")
 def index():
     page = os.path.join(_STATIC, "index.html")

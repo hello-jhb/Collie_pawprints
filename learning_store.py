@@ -58,6 +58,34 @@ def _events_file() -> Path:
 def _enabled() -> bool:
     return os.getenv("COLLIE_LEARNING", "1").lower() not in ("0", "false", "no")
 
+
+# --- Backend selection ------------------------------------------------------
+# Local JSONL is the default (dev/tests). In production set COLLIE_LEARNING_BACKEND
+# =firestore to durably capture across ephemeral Cloud Run instances. Everything
+# degrades to a no-op if the backend is misconfigured — capture must never block
+# analyze, and a missing dependency/credential must not crash the app.
+_FS_MAX_READ = 5000
+_fs_client = None
+
+
+def _backend() -> str:
+    return os.getenv("COLLIE_LEARNING_BACKEND", "local").lower()
+
+
+def _fs_collection() -> str:
+    return os.getenv("COLLIE_LEARNING_COLLECTION", "collie_learning_events")
+
+
+def _firestore():
+    """Lazy Firestore client (uses Application Default Credentials — automatic on
+    Cloud Run via the service account). Raises if the lib/creds are absent; callers
+    catch and degrade."""
+    global _fs_client
+    if _fs_client is None:
+        from google.cloud import firestore  # lazy import — optional dependency
+        _fs_client = firestore.Client(project=os.getenv("COLLIE_GCP_PROJECT") or None)
+    return _fs_client
+
 # Decision vocabulary — what GPT did relative to the deterministic pick.
 AGREED = "agreed"        # GPT confirmed the engine's value
 CORRECTED = "corrected"  # GPT replaced a weak engine value (adopted)
@@ -80,18 +108,22 @@ def file_fingerprint(path: str | Path) -> str | None:
 
 
 def _append(event: dict) -> None:
-    """Best-effort append of one JSON line. NEVER raises — a broken store must not
-    break analyze."""
+    """Best-effort append of one decision. NEVER raises — a broken store (missing
+    dependency, no credentials, read-only FS) must not break analyze."""
     if not _enabled():
         return
     try:
+        if _backend() == "firestore":
+            _firestore().collection(_fs_collection()).add(event)
+            return
         d = _dir()
         d.mkdir(parents=True, exist_ok=True)
         line = json.dumps(event, default=str, ensure_ascii=False)
         with _LOCK, open(d / "events.jsonl", "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception as e:  # pragma: no cover - defensive
-        log.debug("learning append skipped (%s: %s)", type(e).__name__, e)
+        log.debug("learning append skipped (%s backend, %s: %s)", _backend(),
+                  type(e).__name__, e)
 
 
 def record_resolution(
@@ -118,8 +150,37 @@ def record_resolution(
     _append(ev)
 
 
+def backend_status() -> dict:
+    """What the store is writing to right now + whether it's reachable — surfaced in
+    the dashboard so you can see at a glance that capture is live in production."""
+    b = _backend()
+    st = {"backend": b, "enabled": _enabled()}
+    if b == "firestore":
+        st["collection"] = _fs_collection()
+        try:
+            _firestore().collection(_fs_collection()).limit(1).get()
+            st["reachable"] = True
+        except Exception as e:
+            st["reachable"] = False
+            st["error"] = f"{type(e).__name__}: {e}"
+    else:
+        st["path"] = str(_events_file())
+        st["reachable"] = _dir().exists() or True   # created lazily on first write
+    return st
+
+
 def read_events(limit: int | None = None) -> list[dict]:
-    """All recorded events (oldest first), or the last `limit`."""
+    """All recorded events (oldest first), or the last `limit`. Reads from whichever
+    backend is active; returns [] on any read error (a broken store never breaks a
+    report)."""
+    if _backend() == "firestore":
+        try:
+            q = _firestore().collection(_fs_collection()).order_by("ts").limit(_FS_MAX_READ)
+            out = [d.to_dict() for d in q.stream()]
+            return out[-limit:] if limit else out
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("firestore read failed (%s: %s)", type(e).__name__, e)
+            return []
     ev_file = _events_file()
     if not ev_file.exists():
         return []
@@ -200,7 +261,7 @@ def main() -> None:
     """`python3 learning_store.py` — the human review surface: loop health + the
     patterns recurring across enough files to be worth promoting into Python."""
     s = summarize()
-    print(f"Learning store: {_events_file()}")
+    print(f"Learning store backend: {backend_status()}")
     print(f"  events={s['total']}  distinct_files={s['distinct_files']}")
     print(f"  by layer:    {s['by_layer']}")
     print(f"  by decision: {s['by_decision']}")
