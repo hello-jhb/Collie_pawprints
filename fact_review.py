@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from scenarios._llm import get_client, MODEL, REASONING_EFFORT
+from scenarios._llm import get_client, MODEL_FAST, REASONING_EFFORT
 from wb_io import safe_load_workbook
 
 log = logging.getLogger("fb.factreview")
@@ -180,7 +180,7 @@ def review_headline_facts(file_path: str | Path, dt: dict) -> dict:
     user = (f"HEADLINE FACTS (engine):\n{facts_block}\n\nSUMMARY SHEET TEXT:\n{summary}")
     try:
         resp = client.chat.completions.create(
-            model=MODEL, reasoning_effort=REASONING_EFFORT,
+            model=MODEL_FAST, reasoning_effort=REASONING_EFFORT,  # audit task — fast model
             messages=[{"role": "system", "content": _SYSTEM},
                       {"role": "user", "content": user}],
         )
