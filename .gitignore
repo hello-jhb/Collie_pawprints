@@ -1,0 +1,17 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime artifacts (regenerated at runtime — never commit)
+uploads/
+cache/
+
+# Local env
+.venv/
+venv/
+.env
+*.log
+
+# OS
+.DS_Store
