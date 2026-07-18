@@ -535,3 +535,108 @@ def scenario_ready(scenario: str, ssot: dict[str, Any] | None = None) -> dict[st
         "layers_present": sorted(present),
         "example_missing": missing,
     }
+
+
+# -----------------------------------------------------------------------------
+# M1 — portfolio spine: per-property SSOTs + portfolio.json
+#
+# The single-asset API above keeps working untouched (current_asset.json is
+# still the "active" asset). M1 adds N per-property SSOTs, same shape, stored
+# as assets/<property_id>.json, plus assets/portfolio.json holding the roll-up
+# (computed by portfolio.py — this module only owns storage).
+# -----------------------------------------------------------------------------
+
+PORTFOLIO_FILE = ASSETS_DIR / "portfolio.json"
+
+# property_id must already be canonical (property_registry.resolve_property_id)
+_PROPERTY_ID_RE_OK = None  # set lazily to avoid import-order surprises
+
+
+def _check_pid(property_id: str) -> str:
+    """Guard: ids are canonical slugs, and never collide with reserved files."""
+    import re as _re
+    if not property_id or not _re.fullmatch(r"[a-z0-9][a-z0-9-]*", property_id):
+        raise ValueError(f"Not a canonical property_id: {property_id!r}")
+    if property_id in ("current_asset", "portfolio", "property_aliases"):
+        raise ValueError(f"Reserved id: {property_id!r}")
+    return property_id
+
+
+def property_ssot_path(property_id: str) -> Path:
+    return ASSETS_DIR / f"{_check_pid(property_id)}.json"
+
+
+def load_property_ssot(property_id: str) -> dict[str, Any]:
+    """Read one property's SSOT; creates an empty one (on disk) if missing."""
+    path = property_ssot_path(property_id)
+    ASSETS_DIR.mkdir(exist_ok=True)
+    if not path.exists():
+        ssot = _empty_ssot(asset_id=property_id)
+        with open(path, "w") as f:
+            json.dump(ssot, f, indent=2, default=str)
+        return ssot
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+def save_property_ssot(property_id: str, ssot: dict[str, Any]) -> None:
+    path = property_ssot_path(property_id)
+    ASSETS_DIR.mkdir(exist_ok=True)
+    ssot["asset_id"] = property_id
+    ssot["updated_at"] = _now_iso()
+    with open(path, "w") as f:
+        json.dump(ssot, f, indent=2, default=str)
+
+
+def list_property_ids() -> list[str]:
+    """Canonical ids of every per-property SSOT on disk."""
+    if not ASSETS_DIR.exists():
+        return []
+    out = []
+    for p in ASSETS_DIR.glob("*.json"):
+        stem = p.stem
+        if stem in ("current_asset", "portfolio", "property_aliases"):
+            continue
+        out.append(stem)
+    return sorted(out)
+
+
+def set_active_property(property_id: str) -> dict[str, Any]:
+    """
+    Point the single-asset API at one property: copies that property's SSOT
+    into current_asset.json so all existing single-asset code keeps working.
+    """
+    ssot = load_property_ssot(property_id)
+    save_ssot(ssot)
+    return ssot
+
+
+def _empty_portfolio(portfolio_id: str = "default") -> dict[str, Any]:
+    return {
+        "portfolio_id": portfolio_id,
+        "properties": [],       # canonical property_ids on the spine
+        "rollup": {},           # metric_id -> roll-up cell (see portfolio.py)
+        "disagreements": [],    # recorded verbatim, never adjudicated (M2)
+        "rollup_version": None,
+        "computed_at": None,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    }
+
+
+def load_portfolio() -> dict[str, Any]:
+    ASSETS_DIR.mkdir(exist_ok=True)
+    if not PORTFOLIO_FILE.exists():
+        pf = _empty_portfolio()
+        with open(PORTFOLIO_FILE, "w") as f:
+            json.dump(pf, f, indent=2, default=str)
+        return pf
+    with open(PORTFOLIO_FILE, "r") as f:
+        return json.load(f)
+
+
+def save_portfolio(portfolio: dict[str, Any]) -> None:
+    ASSETS_DIR.mkdir(exist_ok=True)
+    portfolio["updated_at"] = _now_iso()
+    with open(PORTFOLIO_FILE, "w") as f:
+        json.dump(portfolio, f, indent=2, default=str)
