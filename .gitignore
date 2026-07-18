@@ -15,3 +15,7 @@ venv/
 
 # OS
 .DS_Store
+
+# Real property workbooks — dev samples only, never committed (generality rule)
+Profomas/
+Proformas/
