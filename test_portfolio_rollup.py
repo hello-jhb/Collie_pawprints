@@ -59,6 +59,13 @@ def test_alias_map_resolves_variants_and_ships_empty():
     assert res["matched_alias"] == "alpha twr lp"
 
 
+def test_upload_session_prefix_stripped_from_filename():
+    from property_registry import resolve_property_id
+    res = resolve_property_id(
+        None, filename="0a1b2c3d4e5f67890a1b2c3d4e5f6789__Beta Court Model.xlsx")
+    assert res["property_id"] == "beta-court"
+
+
 def test_filename_fallback_is_flagged():
     from property_registry import resolve_property_id
     res = resolve_property_id(None, filename="/tmp/Beta Court Model_v2.xlsx")
@@ -221,6 +228,63 @@ def test_equity_multiple_not_aggregated():
     em = pf["rollup"]["equity_multiple"]
     assert em["value"] is None
     assert "NOT_AGGREGATED" in em["flags"]
+
+
+def test_record_analysis_routes_canonical_facts_to_property_ssot(_isolated_assets):
+    from portfolio_ingest import record_analysis
+    from ssot import load_property_ssot, load_portfolio
+    canonical = {
+        "purchase_price": {"value": 5000.0, "source": "Summary!D9 (label)",
+                           "validated": True},
+        "noi": {"value": 300.0, "source": "Annual-CF!F20 (NOI)", "validated": True},
+        "levered_irr": {"value": 0.15, "source": "Waterfall!C4 (XIRR)",
+                        "validated": True},
+        "unmapped_concept": {"value": 1.0, "source": "X!A1"},
+    }
+    src = _isolated_assets.parent / "Gamma Plaza Model_v3.xlsx"
+    src.write_bytes(b"fixture")
+    res = record_analysis(src, canonical=canonical, identity_name="Gamma Plaza")
+    assert res["property_id"] == "gamma-plaza"
+    assert res["metrics_written"] == 3  # unmapped concept stays session-only
+    s = load_property_ssot("gamma-plaza")
+    uw = s["layers"]["underwriting"]["metrics"]
+    assert uw["Purchase Price"] == {"value": 5000.0, "sheet": "Summary",
+                                    "cell": "D9", "confidence": "high"}
+    # roll-up refreshed as part of the record
+    pf = load_portfolio()
+    assert pf["rollup"]["purchase_price"]["value"] == 5000.0
+    assert pf["properties"] == ["gamma-plaza"]
+
+
+def test_record_analysis_requires_real_source_file(_isolated_assets, tmp_path):
+    # No file on disk → no record; never fabricate a property from a path
+    # string or a garbage argument.
+    from portfolio_ingest import record_analysis
+    assert record_analysis(tmp_path / "nonexistent.xlsx",
+                           canonical={}, identity_name="Rate") \
+        == {"skipped": "NO_SOURCE"}
+    assert record_analysis(None, canonical=None, identity_name=None) \
+        == {"skipped": "NO_SOURCE"}
+
+
+def test_api_portfolio_endpoint(_isolated_assets):
+    from starlette.testclient import TestClient
+    import server
+    from portfolio_ingest import record_analysis
+    src = _isolated_assets.parent / "Gamma Plaza Model.xlsx"
+    src.write_bytes(b"fixture")
+    record_analysis(src,
+                    canonical={"purchase_price": {"value": 5000.0,
+                                                  "source": "S!A1 (x)",
+                                                  "validated": True}},
+                    identity_name="Gamma Plaza")
+    client = TestClient(server.app)
+    r = client.get("/api/portfolio")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["portfolio"]["rollup"]["purchase_price"]["value"] == 5000.0
+    assert body["property_index"] == [
+        {"property_id": "gamma-plaza", "display_name": "Gamma Plaza"}]
 
 
 def test_rollup_persists_with_version(_isolated_assets):

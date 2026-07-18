@@ -54,6 +54,8 @@ def canonicalize_name(raw: str) -> str:
     tokens, and separator clutter. Keeps street numbers — they identify.
     """
     name = str(raw or "").strip()
+    # Session/upload id prefix ("<hex>__name.xlsx") — infrastructure, not name.
+    name = re.sub(r"^[0-9a-f]{8,}__", "", name, flags=re.IGNORECASE)
     name = re.sub(r"\.(xlsx|xlsm|xls|csv)$", "", name, flags=re.IGNORECASE)
     name = re.sub(r"[_()\[\]]+", " ", name)   # separators first, so \b works
     name = _DATE_RE.sub(" ", name)
