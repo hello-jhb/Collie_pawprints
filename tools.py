@@ -38,6 +38,7 @@ from metric_resolver import resolve_metric, make_cache_key, RESOLVER_VERSION, bu
 from metric_fallback import fallback_find_metric, FALLBACK_VERSION
 from metric_resolver_gpt import (
     resolve_pool_with_gpt,
+    challenge_single_candidate,
     run_identity_checks,
     RESOLVER_GPT_VERSION,
 )
@@ -578,6 +579,14 @@ def _run_bounded_extraction(
 
             if record["status"] == "candidate_pool" and llm_available():
                 record = resolve_pool_with_gpt(record, metric, file_path)
+
+            # M0 backstop — a lone passing candidate has no pool to be
+            # disambiguated against, so it used to ship as "verified" with no
+            # reconciliation. Corroborate deterministically (cross-sheet value
+            # agreement) or challenge with one adversarial GPT read. Flags,
+            # never substitutes. No-op for pool-resolved records (>=2 passing).
+            if record["status"] == "verified":
+                record = challenge_single_candidate(record, metric, file_path)
 
         record["candidates"] = record.get("candidates", [])[:5]
         return metric["metric_name"], record, is_section

@@ -28,7 +28,7 @@ from functools import lru_cache
 from typing import Any
 
 
-RESOLVER_VERSION = "phase3.v10"  # identity checks run only after reconciliation
+RESOLVER_VERSION = "phase3.v11"  # M0: single-candidate corroboration backstop
 
 
 @lru_cache(maxsize=1)
@@ -611,3 +611,58 @@ def make_cache_key(
         f"|{KNOWLEDGE_VERSION}|{CLASSIFIER_VERSION}|{SECTION_READER_VERSION}"
     )
     return hashlib.sha256(composite.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# M0 — single-candidate backstop, deterministic half.
+#
+# resolve_metric() marks a record "verified" when exactly ONE candidate passes
+# schema validation. That path had no reconciliation backstop: the Phase 2 GPT
+# resolver only fires on multi-candidate pools, so a single in-range candidate
+# from the wrong row shipped as verified. These helpers are the deterministic
+# half of the fix; the GPT challenge (metric_resolver_gpt.challenge_single_
+# candidate) is the escalation for candidates code alone cannot corroborate.
+# ---------------------------------------------------------------------------
+
+def passing_candidates(record: dict) -> list[dict]:
+    """All candidates on this record that passed schema validation."""
+    return [c for c in (record.get("candidates") or []) if c.get("passes_validation")]
+
+
+def is_lone_verified(record: dict) -> bool:
+    """
+    True when this record is 'verified' on the strength of exactly one
+    validation-passing candidate — the confident-but-wrong risk profile.
+    Section-reader records (empty candidate list, own conflict detection via
+    'alt') and pool-resolved records (>=2 passing, GPT-adjudicated) are False.
+    """
+    if record.get("status") != "verified":
+        return False
+    return len(passing_candidates(record)) == 1
+
+
+def corroborate_lone_candidate(record: dict, tol: float = 0.01) -> dict | None:
+    """
+    Deterministic corroboration for a lone verified candidate: does any OTHER
+    candidate — on a DIFFERENT sheet, validation-passing or not — carry the
+    same value within tolerance? Cross-sheet value agreement is independent
+    evidence the number is real (two tabs reporting the same figure), and it
+    is free: no model call.
+
+    Returns the corroborating candidate dict, or None.
+    """
+    chosen_sheet = record.get("source_sheet")
+    chosen_value = record.get("raw_value")
+    pv, ok = parse_numeric_value(chosen_value)
+    if not ok or not isinstance(pv, (int, float)):
+        return None
+    for cand in record.get("candidates") or []:
+        if cand.get("sheet") == chosen_sheet:
+            continue
+        cv, cok = parse_numeric_value(cand.get("value"))
+        if not cok or not isinstance(cv, (int, float)):
+            continue
+        denom = max(abs(pv), abs(cv), 1e-9)
+        if abs(pv - cv) / denom <= tol:
+            return cand
+    return None

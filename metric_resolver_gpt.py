@@ -33,7 +33,7 @@ if not log.handlers:
     log.setLevel(logging.INFO)
 
 
-RESOLVER_GPT_VERSION = "phase2.v2"  # improved prompt: period glossary + industry conventions
+RESOLVER_GPT_VERSION = "phase2.v3"  # M0: single-candidate adversarial challenge
 
 
 # =============================================================================
@@ -594,3 +594,173 @@ def run_comprehension_review(bounded_metrics: dict) -> dict:
     except Exception as e:
         log.error("Comprehension review API failed: %s", e)
         return {"flags": [], "overall": ""}
+
+
+# =============================================================================
+# M0 — single-candidate backstop, challenge half.
+#
+# The Phase 2 resolver above fires only when MULTIPLE candidates pass schema
+# validation. A single in-range candidate skipped it entirely and shipped as
+# "verified" — the confident-but-wrong gap. This challenge closes it:
+#
+#   1. Deterministic corroboration first (metric_resolver.corroborate_lone_
+#      candidate): another sheet showing the same value is independent evidence;
+#      no model call, record stays verified with a corroboration note.
+#   2. Otherwise ONE adversarial GPT read of the candidate in its cell context:
+#      is this cell semantically the requested metric, or a near-miss (wrong
+#      period, subtotal, per-unit figure, wrong concept)?
+#
+# The challenge FLAGS; it never substitutes a value. A rejected candidate is
+# downgraded to "suspicious" with the reasoning in validation_notes and the
+# challenge recorded in the audit block — the wrong number is surfaced, not
+# silently replaced. GPT unavailability or an API failure leaves the record
+# verified but annotated as unchallenged, so the absence of the check is
+# itself visible downstream.
+# =============================================================================
+
+CHALLENGE_SYSTEM = """\
+You are an adversarial reviewer of a single automated spreadsheet extraction
+from a real estate underwriting model. Exactly one candidate cell was found
+for the requested metric, so there is no pool to compare against — your job
+is to try to REJECT it.
+
+Reject when the cell context shows a semantic near-miss:
+  - wrong period (Exit NOI when going-in NOI was requested; Year 5 vs Year 1)
+  - a subtotal, per-unit, per-key, or per-SF figure when the total was requested
+  - a related-but-different concept (Hard Costs when Total Project Cost was
+    requested; senior loan when total debt was requested)
+  - a scenario/sensitivity cell rather than the base case
+
+Accept when the row label, column header, and surrounding context genuinely
+match the metric definition. Do not reject merely because context is sparse —
+reject only on positive evidence of a mismatch.
+
+Return ONLY JSON:
+{
+  "verdict": "accept" | "reject",
+  "reasoning": "one sentence citing the label/header/context clue",
+  "confidence": "high" | "medium" | "low"
+}
+No prose, no markdown fences.
+"""
+
+
+def challenge_single_candidate(record: dict, metric: dict, file_path: Path) -> dict:
+    """
+    M0 backstop for a record verified on exactly one passing candidate.
+    Mutates and returns `record`. Safe to call on any record — guards
+    make it a no-op unless the risk profile matches.
+    """
+    from metric_resolver import (
+        is_lone_verified,
+        passing_candidates,
+        corroborate_lone_candidate,
+    )
+
+    if not is_lone_verified(record):
+        return record
+
+    notes = record.setdefault("validation_notes", [])
+    audit = record.setdefault("audit", {"accepted": None, "rejected": [], "conflicts": []})
+
+    # --- Step 1: deterministic corroboration (free) -------------------------
+    corroborator = corroborate_lone_candidate(record)
+    if corroborator is not None:
+        notes.append(
+            f"Single-candidate backstop: corroborated — "
+            f"{corroborator.get('sheet')}!{corroborator.get('value_cell')} "
+            f"carries the same value on a different sheet."
+        )
+        audit["challenge"] = {
+            "method": "cross_sheet_corroboration",
+            "verdict": "accept",
+            "corroborator": {
+                "sheet": corroborator.get("sheet"),
+                "cell": corroborator.get("value_cell"),
+                "value": corroborator.get("value"),
+            },
+        }
+        return record
+
+    # --- Step 2: adversarial GPT challenge ----------------------------------
+    if not llm_available():
+        notes.append(
+            "Single-candidate backstop: UNCHALLENGED — no cross-sheet "
+            "corroboration and LLM unavailable. Treat with care."
+        )
+        audit["challenge"] = {"method": "none", "verdict": "unchallenged"}
+        return record
+
+    cand = passing_candidates(record)[0]
+
+    try:
+        wb = safe_load_workbook(file_path, data_only=True, read_only=False)
+    except Exception as e:
+        log.error("Challenge: could not open workbook for %s: %s",
+                  metric.get("metric_name"), e)
+        notes.append("Single-candidate backstop: UNCHALLENGED — workbook unreadable for context.")
+        audit["challenge"] = {"method": "none", "verdict": "unchallenged"}
+        return record
+
+    ctx = _gather_candidate_context(wb, cand)
+    try:
+        wb.close()
+    except Exception:
+        pass
+
+    user_msg = (
+        f"METRIC: {metric['metric_name']}\n"
+        f"DEFINITION: {metric.get('definition', '')}\n"
+        f"EXPECTED UNIT: {metric.get('unit')}\n"
+        f"EXPECTED PERIOD: {metric.get('period')}\n"
+        f"PREFERRED SHEETS: {', '.join(metric.get('preferred_sheets', []) or [])}\n"
+        f"\nTHE ONLY CANDIDATE FOUND:\n\n"
+        + _format_candidate_for_prompt(0, cand, ctx)
+    )
+
+    log.info("Challenge START for %s (lone candidate %s!%s)",
+             metric["metric_name"], cand.get("sheet"), cand.get("value_cell"))
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_FAST,
+            reasoning_effort=REASONING_EFFORT,
+            messages=[
+                {"role": "system", "content": CHALLENGE_SYSTEM},
+                {"role": "user",   "content": user_msg},
+            ],
+        )
+        raw = response.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        result = json.loads(raw)
+    except Exception as e:
+        # Fail open but visibly — consistent with resolver/comprehension paths.
+        log.error("Challenge failed for %s: %s", metric["metric_name"], e)
+        notes.append(f"Single-candidate backstop: UNCHALLENGED — challenge call failed ({e}).")
+        audit["challenge"] = {"method": "gpt", "verdict": "unchallenged"}
+        return record
+
+    verdict    = result.get("verdict")
+    reasoning  = str(result.get("reasoning", ""))[:200]
+    confidence = result.get("confidence", "low")
+
+    audit["challenge"] = {
+        "method": "gpt", "verdict": verdict,
+        "reasoning": reasoning, "confidence": confidence,
+    }
+
+    if verdict == "reject":
+        record["status"] = "suspicious"
+        notes.append(
+            f"Single-candidate backstop: REJECTED ({confidence} confidence) — {reasoning}"
+        )
+        log.info("Challenge REJECTED %s — %s", metric["metric_name"], reasoning[:80])
+    else:
+        notes.append(
+            f"Single-candidate backstop: challenged and accepted ({confidence} confidence) — {reasoning}"
+        )
+        log.info("Challenge ACCEPTED %s — %s", metric["metric_name"], reasoning[:80])
+    return record
