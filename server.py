@@ -209,6 +209,18 @@ async def analyze(model: UploadFile = File(...),
                               "read — here's what we can see; ask about any sheet.")
             return _store(r, read_md=r["read_md"], fs=r["fact_sheet"], source="limited")
 
+    # M1 — portfolio spine (additive, best-effort; never breaks the response).
+    # Route this workbook's validated canonical facts into its per-property
+    # SSOT and refresh the fund roll-up. Identity reuses the name the analysis
+    # already extracted, so no extra workbook read on the hot path.
+    try:
+        from portfolio_ingest import record_analysis
+        _id_name = ((analysis.get("property") or {}).get("name") or {}).get("value")
+        record_analysis(model_path, canonical=dt.get("canonical") or {},
+                        identity_name=_id_name)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[%s] portfolio record skipped: %s", sid, e)
+
     log.info("[%s] analyze DONE (phase 1, deterministic) mode=%s", sid, fs.get("mode"))
     payload = {"session_id": sid, "mode": fs.get("mode"),
                "read_md": None, "detail_md": analysis.get("md"),
@@ -533,6 +545,28 @@ async def access(name: str = Form(...), email: str = Form(...),
     except Exception as e:  # noqa: BLE001 - never block access on a capture failure
         log.warning("access signup capture failed (%s: %s): %s <%s>", type(e).__name__, e, name, email)
         return {"ok": True, "stored": False}
+
+
+@app.get("/api/portfolio")
+def portfolio_api():
+    """M1 — the fund-level roll-up across every property on the spine.
+
+    Read-only: returns assets/portfolio.json as last computed (each analyze
+    refreshes it). Every roll-up cell carries method, per-property inputs with
+    file/sheet/cell provenance, missing lists, and flags (PARTIAL_ROLLUP,
+    LAYER_MISMATCH, WEIGHTED_FALLBACK, NOT_AGGREGATED). Disagreements are
+    recorded verbatim, never adjudicated (M2)."""
+    from ssot import load_portfolio, list_property_ids, load_property_ssot
+    pf = load_portfolio()
+    # Display names for the UI (identity lives on each property's SSOT).
+    props = []
+    for pid in (pf.get("properties") or list_property_ids()):
+        try:
+            ident = load_property_ssot(pid).get("identity") or {}
+        except ValueError:
+            continue
+        props.append({"property_id": pid, "display_name": ident.get("name")})
+    return {"portfolio": pf, "property_index": props}
 
 
 @app.get("/healthz")
